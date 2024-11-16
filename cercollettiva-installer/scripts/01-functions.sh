@@ -28,6 +28,7 @@ show_banner() {
         Energy COMMUNITY Management Platform
  =====================================================
          [ Developed by Andrea Bernardi ]
+         [ Version: 1.0 - November 2024  ]
  =====================================================
 EOF
     echo -e "${NC}"
@@ -38,6 +39,10 @@ log() {
     local level=$1
     local message=$2
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Crea directory per log se non esiste
+    mkdir -p "$(dirname "$INSTALL_LOG")"
+    
     echo "[$timestamp] [$level] $message" >> "$INSTALL_LOG"
 
     # Output colorato su console
@@ -67,8 +72,13 @@ handle_error() {
     echo -e "${YELLOW}Log completo disponibile in: $INSTALL_LOG${NC}"
     
     # Mostra ultimi 5 errori dal log
-    echo -e "\nUltimi errori dal log:"
-    grep "\[ERROR\]" "$INSTALL_LOG" | tail -n 5
+    if [ -f "$INSTALL_LOG" ]; then
+        echo -e "\nUltimi errori dal log:"
+        grep "\[ERROR\]" "$INSTALL_LOG" | tail -n 5
+    fi
+    
+    # Cleanup in caso di errore
+    cleanup_on_error
     
     exit $error_code
 }
@@ -107,6 +117,9 @@ show_progress() {
     fi
     
     echo -e "${BLUE}╚══════════════════════════════════════════════════╝${NC}\n"
+
+    # Mostra informazioni sistema
+    check_system
 }
 
 # Aggiorna progresso
@@ -126,12 +139,14 @@ update_progress() {
 # Verifica sistema
 check_system() {
     local total_mem=$(free -m | awk '/^Mem:/{print $2}')
-    local available_space=$(df -m / | awk 'NR==2 {print $4}')
+    local available_space=$(df -m "$APP_ROOT" | awk 'NR==2 {print $4}')
     local cpu_temp=$(vcgencmd measure_temp 2>/dev/null | cut -d= -f2 | cut -d. -f1)
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
     
     echo -e "\n${BLUE}═══ Informazioni Sistema ═══${NC}"
     echo -e "RAM Totale: ${GREEN}${total_mem}MB${NC}"
     echo -e "Spazio Disponibile: ${GREEN}${available_space}MB${NC}"
+    echo -e "CPU Usage: ${GREEN}${cpu_usage}%${NC}"
     if [ ! -z "$cpu_temp" ]; then
         echo -e "Temperatura CPU: ${GREEN}${cpu_temp}°C${NC}"
     fi
@@ -143,6 +158,7 @@ create_backup() {
     log "INFO" "Creazione backup di sicurezza: $backup_name"
     
     if [ -d "$APP_PATH" ]; then
+        mkdir -p "$BACKUP_PATH"
         tar -czf "$BACKUP_PATH/$backup_name.tar.gz" -C "$APP_PATH" . &> /dev/null
         if [ $? -eq 0 ]; then
             log "SUCCESS" "Backup creato con successo"
@@ -154,14 +170,18 @@ create_backup() {
 
 # Cleanup vecchi backup
 cleanup_old_backups() {
-    find "$BACKUP_PATH" -name "backup_*.tar.gz" -mtime +$BACKUP_RETENTION_DAYS -delete
+    if [ -d "$BACKUP_PATH" ]; then
+        find "$BACKUP_PATH" -name "backup_*.tar.gz" -mtime +$BACKUP_RETENTION_DAYS -delete
+    fi
 }
 
 # Verifica connessione internet
 check_internet() {
+    log "INFO" "Verifica connessione internet..."
     if ! ping -c 1 8.8.8.8 &> /dev/null; then
         handle_error "Connessione Internet non disponibile"
     fi
+    log "SUCCESS" "Connessione internet verificata"
 }
 
 # Spinner per operazioni lunghe
@@ -179,15 +199,22 @@ spinner() {
     printf "    \b\b\b\b"
 }
 
-# Funzione di pulizia
+# Cleanup in caso di errore
+cleanup_on_error() {
+    log "INFO" "Pulizia dopo errore..."
+    rm -f "$APP_PATH/.install_error"
+    rm -f "$APP_PATH/.install_progress"
+    rm -f "/tmp/cercollettiva_install.lock"
+}
+
+# Funzione di pulizia generale
 cleanup() {
     log "INFO" "Pulizia file temporanei..."
     rm -f "$APP_PATH/.install_error"
-    rm -rf "$APP_PATH/tmp"
+    rm -f "$APP_PATH/.install_progress"
+    rm -f "/tmp/cercollettiva_install.lock"
+    cleanup_old_backups
 }
 
 # Trap per gestire interruzioni
 trap 'handle_error "Installazione interrotta" 130' INT TERM
-
-# Salva PID per eventuali kill
-echo $$ > "$APP_PATH/.install.pid"
