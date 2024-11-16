@@ -25,7 +25,7 @@ show_banner() {
 / /___/  __/ /  / /___/ /_/ / |/  __/ |_| |_| |\ V / (_)
 \____/\___/_/   \____/\____/|_|\___|\__|\__|_| \_/ \___/
                                                       
-        Energy COMMUNITY Management Platform
+        Energy CAMMUNITY Management Platform
  =====================================================
          [ Developed by Andrea Bernardi ]
          [ Version: 1.0 - November 2024  ]
@@ -61,11 +61,6 @@ handle_error() {
     
     log "ERROR" "$error_msg"
     
-    # Salva stato di errore
-    echo "ERROR: $error_msg" > "$APP_PATH/.install_error"
-    echo "STEP: $CURRENT_STEP" >> "$APP_PATH/.install_error"
-    echo "TASK: ${TASKS[$CURRENT_TASK]}" >> "$APP_PATH/.install_error"
-    
     echo -e "\n${RED}╔════ ERRORE CRITICO ════╗${NC}"
     echo -e "${RED}║${NC} $error_msg"
     echo -e "${RED}╚════════════════════════╝${NC}"
@@ -88,6 +83,27 @@ show_progress() {
     clear
     show_banner
     
+    # Informazioni Sistema essenziali
+    echo -e "\n${BLUE}╔════════════════ Informazioni Sistema ════════════════╗${NC}"
+    # CPU e Temperatura
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
+    local cpu_temp=$(vcgencmd measure_temp 2>/dev/null | cut -d= -f2 | cut -d. -f1)
+    echo -e "${BLUE}║${NC} CPU: ${GREEN}${cpu_usage}%${NC} (${GREEN}${cpu_temp}°C${NC})"
+    
+    # Memoria
+    local mem_percent=$(free | grep Mem | awk '{print int($3/$2 * 100)}')
+    echo -e "${BLUE}║${NC} RAM: ${GREEN}${mem_percent}%${NC} utilizzata"
+    
+    # Storage
+    local disk_percent=$(df -h / | awk 'NR==2 {print $5}')
+    echo -e "${BLUE}║${NC} Disco: ${GREEN}${disk_percent}${NC} utilizzato"
+    
+    # IP
+    local ip_address=$(hostname -I | cut -d' ' -f1)
+    echo -e "${BLUE}║${NC} IP: ${GREEN}${ip_address}${NC}"
+    echo -e "${BLUE}╚══════════════════════════════════════════════════╝${NC}"
+
+    # Stato Installazione
     local percentage=$((CURRENT_STEP * 100 / TOTAL_STEPS))
     local bar_width=50
     local completed=$((percentage * bar_width / 100))
@@ -117,9 +133,6 @@ show_progress() {
     fi
     
     echo -e "${BLUE}╚══════════════════════════════════════════════════╝${NC}\n"
-
-    # Mostra informazioni sistema
-    check_system
 }
 
 # Aggiorna progresso
@@ -134,45 +147,6 @@ update_progress() {
     fi
     
     show_progress
-}
-
-# Verifica sistema
-check_system() {
-    local total_mem=$(free -m | awk '/^Mem:/{print $2}')
-    local available_space=$(df -m "$APP_ROOT" | awk 'NR==2 {print $4}')
-    local cpu_temp=$(vcgencmd measure_temp 2>/dev/null | cut -d= -f2 | cut -d. -f1)
-    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
-    
-    echo -e "\n${BLUE}═══ Informazioni Sistema ═══${NC}"
-    echo -e "RAM Totale: ${GREEN}${total_mem}MB${NC}"
-    echo -e "Spazio Disponibile: ${GREEN}${available_space}MB${NC}"
-    echo -e "CPU Usage: ${GREEN}${cpu_usage}%${NC}"
-    if [ ! -z "$cpu_temp" ]; then
-        echo -e "Temperatura CPU: ${GREEN}${cpu_temp}°C${NC}"
-    fi
-}
-
-# Backup di sicurezza
-create_backup() {
-    local backup_name="backup_$(date +%Y%m%d_%H%M%S)"
-    log "INFO" "Creazione backup di sicurezza: $backup_name"
-    
-    if [ -d "$APP_PATH" ]; then
-        mkdir -p "$BACKUP_PATH"
-        tar -czf "$BACKUP_PATH/$backup_name.tar.gz" -C "$APP_PATH" . &> /dev/null
-        if [ $? -eq 0 ]; then
-            log "SUCCESS" "Backup creato con successo"
-        else
-            log "WARNING" "Errore durante la creazione del backup"
-        fi
-    fi
-}
-
-# Cleanup vecchi backup
-cleanup_old_backups() {
-    if [ -d "$BACKUP_PATH" ]; then
-        find "$BACKUP_PATH" -name "backup_*.tar.gz" -mtime +$BACKUP_RETENTION_DAYS -delete
-    fi
 }
 
 # Verifica connessione internet
@@ -197,6 +171,29 @@ spinner() {
         printf "\b\b\b\b\b\b"
     done
     printf "    \b\b\b\b"
+}
+
+# Backup di sicurezza
+create_backup() {
+    local backup_name="backup_$(date +%Y%m%d_%H%M%S)"
+    log "INFO" "Creazione backup di sicurezza: $backup_name"
+    
+    if [ -d "$APP_PATH" ]; then
+        mkdir -p "$BACKUP_PATH"
+        tar -czf "$BACKUP_PATH/$backup_name.tar.gz" -C "$APP_PATH" . &> /dev/null
+        if [ $? -eq 0 ]; then
+            log "SUCCESS" "Backup creato con successo"
+        else
+            log "WARNING" "Errore durante la creazione del backup"
+        fi
+    fi
+}
+
+# Cleanup vecchi backup
+cleanup_old_backups() {
+    if [ -d "$BACKUP_PATH" ]; then
+        find "$BACKUP_PATH" -name "backup_*.tar.gz" -mtime +$BACKUP_RETENTION_DAYS -delete
+    fi
 }
 
 # Cleanup in caso di errore
