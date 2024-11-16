@@ -18,6 +18,7 @@ create_superuser() {
     log "INFO" "Creazione superuser Django..."
     update_progress "superuser" "in_progress"
     
+    cd "$PROJECT_PATH"
     source "$VENV_PATH/bin/activate"
     
     echo -e "\n${YELLOW}Creazione account amministratore${NC}"
@@ -55,7 +56,7 @@ test_installation() {
     done
     
     # Test permessi directory
-    if [ ! -w "$APP_PATH/media" ] || [ ! -w "$APP_PATH/staticfiles" ]; then
+    if [ ! -w "$MEDIA_PATH" ] || [ ! -w "$STATIC_PATH" ]; then
         log "ERROR" "Permessi directory non corretti"
         errors=$((errors + 1))
     fi
@@ -67,12 +68,21 @@ test_installation() {
         errors=$((errors + 1))
     fi
     
+    # Test database
+    cd "$PROJECT_PATH"
+    source "$VENV_PATH/bin/activate"
+    python manage.py check --database default
+    if [ $? -ne 0 ]; then
+        log "ERROR" "Test database fallito"
+        errors=$((errors + 1))
+    fi
+    
     return $errors
 }
 
 # Generazione report finale
 generate_report() {
-    local report_file="$APP_PATH/installation_report.txt"
+    local report_file="$PROJECT_PATH/installation_report.txt"
     
     {
         echo "=== CerCollettiva Installation Report ==="
@@ -82,6 +92,7 @@ generate_report() {
         
         echo "== Versioni Software =="
         echo "Python: $(python3 --version)"
+        echo "Django: $(python -c 'import django; print(django.get_version())')"
         echo "Nginx: $(nginx -v 2>&1)"
         echo "Database: SQLite $(sqlite3 --version)"
         echo ""
@@ -104,10 +115,20 @@ generate_report() {
         echo "Admin: http://$(hostname -I | cut -d' ' -f1)/admin"
         echo ""
         
+        echo "== Percorsi Importanti =="
+        echo "1. Applicazione: $PROJECT_PATH"
+        echo "2. File statici: $STATIC_PATH"
+        echo "3. File media: $MEDIA_PATH"
+        echo "4. Log di sistema: $LOGS_PATH"
+        echo "5. Backup: $BACKUP_PATH"
+        echo "6. Ambiente virtuale: $VENV_PATH"
+        echo ""
+        
         echo "== Note Importanti =="
-        echo "1. Backup giornalieri in: $BACKUP_PATH"
-        echo "2. Log di sistema in: $LOGS_PATH"
-        echo "3. File configurazione in: $APP_PATH/.env"
+        echo "1. Backup giornalieri automatici alle 2:00 AM"
+        echo "2. Monitoraggio sistema attivo (check ogni 5 minuti)"
+        echo "3. Log rotation configurato"
+        echo "4. Ottimizzazioni applicate per $PI_MODEL"
         
     } > "$report_file"
     
@@ -122,13 +143,20 @@ cleanup_installation() {
     rm -f "$APP_PATH/.install_progress"
     rm -f "$APP_PATH/.install_error"
     rm -f "$APP_PATH/.install.pid"
+    rm -f "/tmp/cercollettiva_install.lock"
     
     # Ottimizza database
+    cd "$PROJECT_PATH"
     source "$VENV_PATH/bin/activate"
     python manage.py clearsessions
     
-    # Pulizia cache pip
+    # Pulizia cache
     pip cache purge
+    sudo apt clean
+    
+    # Mantieni solo gli ultimi 5 backup
+    cd "$BACKUP_PATH"
+    ls -t | tail -n +6 | xargs -r rm
     
     log "SUCCESS" "Pulizia completata"
 }
@@ -143,7 +171,7 @@ show_final_instructions() {
     echo -e "${GREEN}║${NC}  Frontend: http://$(hostname -I | cut -d' ' -f1)                ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  Admin: http://$(hostname -I | cut -d' ' -f1)/admin            ${GREEN}║${NC}"
     echo -e "${GREEN}║                                                          ║${NC}"
-    echo -e "${GREEN}║${NC}  Documentazione: $APP_PATH/installation_report.txt      ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}  Documentazione: $PROJECT_PATH/installation_report.txt      ${GREEN}║${NC}"
     echo -e "${GREEN}║                                                          ║${NC}"
     echo -e "${GREEN}║${NC}  Per assistenza: github.com/andreabernardi/cercollettiva${GREEN}║${NC}"
     echo -e "${GREEN}║                                                          ║${NC}"
