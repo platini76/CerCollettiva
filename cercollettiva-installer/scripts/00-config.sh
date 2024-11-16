@@ -16,10 +16,14 @@ fi
 # Directory di base
 export BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export APP_NAME="cercollettiva"
-export APP_PATH="/home/pi/$APP_NAME"
+export APP_ROOT="/home/pi"
+export APP_PATH="$APP_ROOT/$APP_NAME"
+export PROJECT_PATH="$APP_PATH/app"
 export VENV_PATH="$APP_PATH/venv"
 export BACKUP_PATH="$APP_PATH/backups"
 export LOGS_PATH="$APP_PATH/logs"
+export STATIC_PATH="$PROJECT_PATH/staticfiles"
+export MEDIA_PATH="$PROJECT_PATH/media"
 export INSTALL_LOG="$APP_PATH/installation.log"
 
 # Configurazione server
@@ -117,6 +121,11 @@ export CURRENT_STEP=0
 declare -a COMPLETED_TASKS=()
 export OPTIMIZE_FOR_LOW_MEMORY=false
 
+# Crea le directory necessarie se non esistono
+for dir in "$APP_PATH" "$PROJECT_PATH" "$VENV_PATH" "$BACKUP_PATH" "$LOGS_PATH" "$STATIC_PATH" "$MEDIA_PATH"; do
+    [ ! -d "$dir" ] && mkdir -p "$dir"
+done
+
 # Funzione per caricare configurazioni locali se esistono
 if [ -f "$BASE_DIR/local_config.sh" ]; then
     source "$BASE_DIR/local_config.sh"
@@ -125,14 +134,21 @@ fi
 # Funzione per validare la configurazione
 validate_config() {
     # Verifica directory di base
-    if [ ! -d "$(dirname "$APP_PATH")" ]; then
-        echo "Directory base non valida: $(dirname "$APP_PATH")"
+    if [ ! -d "$APP_ROOT" ]; then
+        echo "Directory base non valida: $APP_ROOT"
         exit 1
     fi
 
     # Verifica porte
     if [ "$NGINX_PORT" -lt 1 ] || [ "$NGINX_PORT" -gt 65535 ]; then
         echo "Porta NGINX non valida: $NGINX_PORT"
+        exit 1
+    fi
+
+    # Verifica spazio disponibile
+    local available_space=$(df -m "$APP_ROOT" | awk 'NR==2 {print $4}')
+    if [ "$available_space" -lt 1000 ]; then
+        echo "Spazio su disco insufficiente (< 1GB)"
         exit 1
     fi
 
@@ -147,4 +163,4 @@ validate_config() {
 validate_config
 
 # Esporta variabili per subprocess
-export APP_NAME APP_PATH VENV_PATH BACKUP_PATH LOGS_PATH INSTALL_LOG
+export APP_NAME APP_PATH PROJECT_PATH VENV_PATH BACKUP_PATH LOGS_PATH INSTALL_LOG STATIC_PATH MEDIA_PATH
