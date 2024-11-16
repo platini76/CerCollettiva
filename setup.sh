@@ -17,7 +17,7 @@ cat << "EOF"
 / /___/  __/ /  / /___/ /_/ / |/  __/ |_| |_| |\ V / (_)
 \____/\___/_/   \____/\____/|_|\___|\__|\__|_| \_/ \___/
                                                       
-        Energy CAMMUNITY Management Platform
+        Energy COMMUNITY Management Platform
  =====================================================
          [ Developed by Andrea Bernardi ]
  =====================================================
