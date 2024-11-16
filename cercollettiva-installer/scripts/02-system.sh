@@ -42,6 +42,28 @@ detect_raspberry_model() {
             export "$config"
         done
     fi
+
+    log "INFO" "Configurazione ottimizzata per $PI_MODEL"
+}
+
+# Prepara la struttura del progetto
+prepare_project_structure() {
+    log "INFO" "Preparazione struttura progetto..."
+    
+    # Verifica e crea le directory necessarie
+    for dir in "$APP_PATH" "$PROJECT_PATH" "$VENV_PATH" "$BACKUP_PATH" "$LOGS_PATH" "$STATIC_PATH" "$MEDIA_PATH"; do
+        if [ ! -d "$dir" ]; then
+            mkdir -p "$dir"
+            log "INFO" "Creata directory: $dir"
+        fi
+    done
+    
+    # Imposta i permessi corretti
+    sudo chown -R pi:www-data "$APP_PATH"
+    sudo chmod -R 755 "$APP_PATH"
+    sudo chmod -R 775 "$MEDIA_PATH" "$STATIC_PATH"
+    
+    log "SUCCESS" "Struttura progetto preparata"
 }
 
 # Aggiornamento del sistema
@@ -50,7 +72,7 @@ update_system() {
     update_progress "system_update" "in_progress"
     
     # Backup sources.list
-    cp /etc/apt/sources.list /etc/apt/sources.list.backup 2>/dev/null
+    sudo cp /etc/apt/sources.list /etc/apt/sources.list.backup 2>/dev/null
     
     {
         # Aggiornamento repository
@@ -71,7 +93,7 @@ update_system() {
         log "SUCCESS" "Sistema aggiornato con successo"
         update_progress "system_update" "completed"
     else
-        # Ripristino backup sources.list in caso di errore
+        # Ripristino backup in caso di errore
         sudo cp /etc/apt/sources.list.backup /etc/apt/sources.list 2>/dev/null
         handle_error "Errore durante l'aggiornamento del sistema"
     fi
