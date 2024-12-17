@@ -26,7 +26,7 @@ CerCollettiva è un software open source progettato per semplificare la creazion
 ## Tecnologie utilizzate
 
 - Linguaggio di programmazione: Python
-- Framework: Djamgo
+- Framework: Django
 - Database: MySQL o PostgreSQL
 - Broker MQTT: Mosquitto
 
