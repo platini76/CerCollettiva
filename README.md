@@ -21,6 +21,8 @@ CerCollettiva è un software open source progettato per semplificare la creazion
 - Amministrazione e reporting
 - Gestione delle domande di contributo PNRR
 
+![Home Page](https://github.com/atomozero/CerCollettiva/blob/main/screenshot/homepage%20V.A.2.png)
+
 ## Tecnologie utilizzate
 
 - Linguaggio di programmazione: PHP
