@@ -403,7 +403,7 @@ class PowerChartManager {
 
         const response = await fetch(
             // Usa il percorso corretto che corrisponde a urls.py
-            `/core/api/plants/${this.plantId}/data/?hours=${hours}`
+            `/api/plants/${this.plantId}/data/?hours=${hours}`
         );
 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
