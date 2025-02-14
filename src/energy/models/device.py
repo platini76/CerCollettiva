@@ -6,6 +6,9 @@ from .base import BaseTimestampModel, BaseMeasurementModel
 #from core.models import Plant
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
+from django.core.cache import cache
+import time 
+
 import logging
 
 from django.core.exceptions import ValidationError
@@ -504,11 +507,19 @@ class DeviceMeasurementDetail(BaseMeasurementModel):
             return False
 
 @receiver([post_save, post_delete], sender=DeviceConfiguration)
-def handle_device_configuration_change(sender, instance, **kwargs):
+def handle_device_configuration_change(sender, instance, created=False, **kwargs):
     """Gestisce i cambiamenti nelle configurazioni dei dispositivi"""
     try:
-        # Evita refresh per gli aggiornamenti di last_seen
-        if kwargs.get('update_fields') == {'last_seen'}:
+        # Evita refresh per aggiornamenti frequenti
+        cache_key = f"device_config_refresh_{instance.id}"
+        last_refresh = cache.get(cache_key)
+        
+        if last_refresh and time.time() - last_refresh < 60:
+            logger.debug("Skipping refresh - too soon")
+            return
+            
+        # Evita refresh per gli aggiornamenti di last_seen e updated_at
+        if kwargs.get('update_fields') in [{'last_seen'}, {'last_seen', 'updated_at'}, {'updated_at', 'last_seen'}]:
             return
             
         from ..mqtt.client import get_mqtt_client
@@ -516,5 +527,9 @@ def handle_device_configuration_change(sender, instance, **kwargs):
         if client and client.is_connected:
             client.refresh_configurations()
             logger.info(f"MQTT configurations refreshed after device change: {instance.device_id}")
+            
+        # Aggiorna timestamp ultimo refresh
+        cache.set(cache_key, time.time(), 300)
+        
     except Exception as e:
         logger.error(f"Error handling device configuration change: {e}")

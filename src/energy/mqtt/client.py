@@ -133,8 +133,22 @@ class EnergyMQTTClient:
     def _process_message(self, msg):
         """Processa un singolo messaggio"""
         try:
+            # Evita refresh troppo frequenti usando una cache
+            cache_key = f"last_refresh_{msg.topic}"
+            last_refresh = getattr(self, '_last_refresh_time', {})
+            current_time = time.time()
+            
+            if cache_key in last_refresh and current_time - last_refresh[cache_key] < 60:
+                # Skip refresh se è passato meno di 1 minuto
+                return
+                
             payload = json.loads(msg.payload.decode('utf-8'))
             self._device_manager.process_message(msg.topic, payload)
+            
+            # Aggiorna timestamp ultimo refresh
+            self._last_refresh_time = getattr(self, '_last_refresh_time', {})
+            self._last_refresh_time[cache_key] = current_time
+            
         except json.JSONDecodeError as e:
             logger.error(f"Error decoding JSON from {msg.topic}: {e}")
         except Exception as e:
@@ -278,40 +292,59 @@ class EnergyMQTTClient:
                     self._retry_delay = min(self._retry_delay * 2, self._max_retry_delay)
 
         threading.Thread(target=reconnect_thread, daemon=True).start()
-        
+            
     def _on_message(self, client, userdata, msg):
-            """Callback per i messaggi ricevuti"""
-            try:
-                data = json.loads(msg.payload.decode('utf-8'))
+        try:
+            data = json.loads(msg.payload.decode('utf-8'))
+            
+            if msg.topic.endswith('/em:0'):
+                device_id = msg.topic.split('/')[2]
+                current_power = data.get('total_act_power')
                 
-                if msg.topic.endswith('/em:0'):
-                    device_id = msg.topic.split('/')[2]  # Estrai l'ID del dispositivo dal topic
-                    current_power = data.get('total_act_power')
+                last_value = self._last_values.get(device_id)
+                
+                if current_power is not None:
+                    is_valid = True
                     
-                    if current_power is not None:
+                    if last_value:
+                        power_diff = abs(current_power - last_value['power'])
+                        time_diff = (timezone.now() - last_value['timestamp']).total_seconds()
+                        
+                        # Ignora variazioni minori di 10W E inferiori al 50% del valore precedente
+                        MIN_POWER_CHANGE = 10  # Variazione minima significativa in W
+                        
+                        if time_diff < 2 and power_diff > MIN_POWER_CHANGE and power_diff > (last_value['power'] * 0.5):
+                            is_valid = False
+                            logger.warning(f"Variazione potenza significativa: {power_diff:.2f}W in {time_diff:.2f}s")
+                            current_power = last_value['power']
+                    
+                    if abs(current_power) > 100000:  # 100kW
+                        is_valid = False
+                        logger.warning(f"Valore potenza fuori range: {current_power}W")
+                        if last_value:
+                            current_power = last_value['power']
+                    
+                    if is_valid or not last_value:
                         self._last_values[device_id] = {
                             'power': current_power,
                             'timestamp': timezone.now()
                         }
-                        logger.info(f"  Potenza Totale [W]: {current_power:.1f}")
-                    else:
-                        # Se non c'è un nuovo valore, usa l'ultimo valore conosciuto
-                        last_value = self._last_values.get(device_id)
-                        if last_value and (timezone.now() - last_value['timestamp']).seconds < 60:
-                            logger.info(f"  Potenza Totale [W]: {last_value['power']:.1f} (mantenuto)")
-                
-                elif msg.topic.endswith('/emdata:0'):
-                    logger.info(f"  Energia Attiva Totale [kWh]: {data.get('total_act', 'N/A'):.2f}")
                     
-                self._device_manager.process_message(msg.topic, msg.payload)
+                    logger.info(f"  Potenza Totale [W]: {current_power:.1f}")
+                    
+                elif last_value and (timezone.now() - last_value['timestamp']).seconds < 120:
+                    logger.info(f"  Potenza Totale [W]: {last_value['power']:.1f} (mantenuto)")
+            
+            elif msg.topic.endswith('/emdata:0'):
+                logger.info(f"  Energia Attiva Totale [kWh]: {data.get('total_act', 'N/A'):.2f}")
                 
-            except json.JSONDecodeError as e:
-                logger.error(f"Error decoding JSON from {msg.topic}: {e}")
-                logger.error(f"Raw payload: {msg.payload}")
-            except Exception as e:
-                logger.error(f"Error processing message on {msg.topic}: {str(e)}")
-
-
+            self._device_manager.process_message(msg.topic, msg.payload)
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding JSON from {msg.topic}: {e}")
+            logger.error(f"Raw payload: {msg.payload}")
+        except Exception as e:
+            logger.error(f"Error processing message on {msg.topic}: {str(e)}")
 
     def _subscribe_topics(self) -> None:
         """Gestisce le sottoscrizioni ai topic MQTT"""
@@ -441,21 +474,41 @@ class EnergyMQTTClient:
     def refresh_configurations(self) -> None:
         """Aggiorna le configurazioni e rinnova le sottoscrizioni"""
         with self._lock:
+            # Salva i valori correnti prima del refresh
+            current_values = self._last_values.copy()
+            
+            # Aggiorna le configurazioni
             self._device_manager.refresh_configurations()
-            if self._is_connected:
-                self._subscribe_topics()
+            
+        if self._is_connected:
+            # Rinnova le sottoscrizioni mantenendo i valori
+            self._subscribe_topics()
+            
+            # Ripristina i valori precedenti
+            self._last_values.update(current_values)
+            
+            # Log per debug
+            logger.info("Configurazioni aggiornate mantenendo i valori esistenti")
 
     def force_refresh(self):
         """Forza il refresh delle configurazioni e delle sottoscrizioni"""
         logger.info("Forcing refresh of MQTT configurations")
+        
+        # Salva i valori correnti
+        current_values = self._last_values.copy()
+        
         self._device_manager.refresh_configurations()
         if self._is_connected:
             # Annulla le vecchie sottoscrizioni
             for topic in self._subscribed_topics:
                 self._client.unsubscribe(topic)
             self._subscribed_topics.clear()
+            
             # Sottoscrivi ai nuovi topic
             self._subscribe_topics()
+            
+            # Ripristina i valori precedenti
+            self._last_values.update(current_values)
 
     def _start_heartbeat(self):
         def heartbeat():
