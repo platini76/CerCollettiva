@@ -193,40 +193,61 @@ class DeviceManager:
             return False
 
     def _handle_energy_message(self, device_config, payload, topic):
-        """Gestisce i messaggi di energia"""
+        """Gestisce i messaggi di energia calcolando il delta tra letture consecutive"""
         try:
-            #logger.info(f"***DEBUG*** _handle_energy_message inizio elaborazione, device: {device_config.device_id}")
             current_timestamp = timezone.now()
             
-            # Estrai i valori di energia dal payload
-            energy_total = payload.get('total_act', 0)
-            energy_returned = payload.get('total_act_ret', 0)
+            # Estrai il valore di energia totale dal payload (in Wh)
+            current_energy_total = float(payload.get('total_act', 0))
             
-            #logger.info(f"***DEBUG*** _handle_energy_message Messaggio energia ricevuto da {device_config.device_id}, energia totale: {energy_total}, energia restituita: {energy_returned}")
-
-            # Crea la misurazione con valori di default per voltage e current
-            measurement = DeviceMeasurement.objects.create(
-                device=device_config,
-                plant=device_config.plant,
-                timestamp=current_timestamp,
-                power=0,  # Per i messaggi di energia, la potenza istantanea non è disponibile
-                voltage=0,  # Valore di default per soddisfare il vincolo NOT NULL
-                current=0,  # Valore di default per soddisfare il vincolo NOT NULL
-                energy_total=energy_total,
-                measurement_type='ENERGY',  # Specifica che è una misurazione di energia
-                quality='GOOD'
-            )
+            # Recupera l'ultimo valore di energia per questo dispositivo
+            last_energy = self._last_energy_values.get(device_config.device_id)
             
-            #logger.info(f"***DEBUG*** _handle_energy_message Misurazione energia salvata nel DB per {device_config.device_id}, energia: {measurement.energy_total}")
-
+            # Calcola il delta solo se abbiamo un valore precedente
+            if last_energy is not None:
+                energy_delta = current_energy_total - last_energy
+                
+                # Verifica che il delta sia positivo e ragionevole (es. max 100000 Wh = 100 kWh in 15 min)
+                if 0 <= energy_delta <= 100000:  
+                    # Crea la misurazione con il delta calcolato
+                    measurement = DeviceMeasurement.objects.create(
+                        device=device_config,
+                        plant=device_config.plant,
+                        timestamp=current_timestamp,
+                        power=0,  # Per i messaggi di energia, la potenza istantanea non è disponibile
+                        voltage=0,  # Valore di default
+                        current=0,  # Valore di default
+                        energy_total=energy_delta / 1000.0,  # Convertiamo da Wh a kWh prima di salvare
+                        measurement_type='ENERGY',
+                        quality='GOOD'
+                    )
+                    
+                    logger.info(f"""
+                        Energy delta calculated for device {device_config.device_id}:
+                        - Previous reading: {last_energy:.3f} Wh
+                        - Current reading: {current_energy_total:.3f} Wh
+                        - Delta: {energy_delta:.3f} Wh ({energy_delta/1000.0:.3f} kWh)
+                    """)
+                else:
+                    logger.warning(f"""
+                        Invalid energy delta for device {device_config.device_id}:
+                        - Previous reading: {last_energy:.3f} Wh
+                        - Current reading: {current_energy_total:.3f} Wh
+                        - Delta: {energy_delta:.3f} Wh
+                    """)
+            else:
+                logger.info(f"First energy reading for device {device_config.device_id}: {current_energy_total:.3f} Wh")
+            
+            # Aggiorna l'ultimo valore per la prossima lettura (manteniamo il valore in Wh)
+            self._last_energy_values[device_config.device_id] = current_energy_total
+            
             # Aggiorna il timestamp dell'ultimo dato ricevuto
             device_config.update_last_seen()
-            #logger.info(f"***DEBUG*** _handle_energy_message update_last_seen completato, device: {device_config.device_id}")
             
             return True
 
         except Exception as e:
-            logger.error(f"Errore nel salvataggio della misurazione di energia: {str(e)}")
+            logger.error(f"Error processing energy message: {str(e)}")
             return False
 
     def _create_phase_details(self, measurement: DeviceMeasurement, payload: Dict[str, Any]):
