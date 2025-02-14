@@ -34,6 +34,7 @@ class EnergyMQTTClient:
         self._is_connected = False
         self._service = get_mqtt_service()
         self._last_message_time = None
+        self._last_values = {}
         self._message_count = 0
         self._retry_delay = 1
         self._max_retry_delay = 60
@@ -279,26 +280,38 @@ class EnergyMQTTClient:
         threading.Thread(target=reconnect_thread, daemon=True).start()
         
     def _on_message(self, client, userdata, msg):
-        """Callback per i messaggi ricevuti"""
-        try:
-            data = json.loads(msg.payload.decode('utf-8'))
-            #logger.info(f"Topic: {msg.topic}")  # Usa logger invece di mqtt_logger
-            
-            if msg.topic.endswith('/em:0'):
-                #logger.info(f"\n=== Messaggio Shelly Potenza Ricevuto ===")
-                logger.info(f"  Potenza Totale [W]: {data.get('total_act_power', 'N/A'):.1f}")
-            
-            elif msg.topic.endswith('/emdata:0'):
-                #logger.info(f"\n=== Messaggio Shelly Energia Ricevuto ===")
-                logger.info(f"  Energia Attiva Totale [kWh]: {data.get('total_act', 'N/A'):.2f}")
+            """Callback per i messaggi ricevuti"""
+            try:
+                data = json.loads(msg.payload.decode('utf-8'))
                 
-            self._device_manager.process_message(msg.topic, msg.payload)
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Error decoding JSON from {msg.topic}: {e}")
-            logger.error(f"Raw payload: {msg.payload}")
-        except Exception as e:
-            logger.error(f"Error processing message on {msg.topic}: {str(e)}")
+                if msg.topic.endswith('/em:0'):
+                    device_id = msg.topic.split('/')[2]  # Estrai l'ID del dispositivo dal topic
+                    current_power = data.get('total_act_power')
+                    
+                    if current_power is not None:
+                        self._last_values[device_id] = {
+                            'power': current_power,
+                            'timestamp': timezone.now()
+                        }
+                        logger.info(f"  Potenza Totale [W]: {current_power:.1f}")
+                    else:
+                        # Se non c'è un nuovo valore, usa l'ultimo valore conosciuto
+                        last_value = self._last_values.get(device_id)
+                        if last_value and (timezone.now() - last_value['timestamp']).seconds < 60:
+                            logger.info(f"  Potenza Totale [W]: {last_value['power']:.1f} (mantenuto)")
+                
+                elif msg.topic.endswith('/emdata:0'):
+                    logger.info(f"  Energia Attiva Totale [kWh]: {data.get('total_act', 'N/A'):.2f}")
+                    
+                self._device_manager.process_message(msg.topic, msg.payload)
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Error decoding JSON from {msg.topic}: {e}")
+                logger.error(f"Raw payload: {msg.payload}")
+            except Exception as e:
+                logger.error(f"Error processing message on {msg.topic}: {str(e)}")
+
+
 
     def _subscribe_topics(self) -> None:
         """Gestisce le sottoscrizioni ai topic MQTT"""
