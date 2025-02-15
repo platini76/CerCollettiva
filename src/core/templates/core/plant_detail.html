@@ -447,33 +447,79 @@ class PowerChartManager {
     }
 }
 
-    updateCurrentValues(data) {
-        if (data.current_power !== undefined) {
-            const powerValue = Math.abs(data.current_power);
-            document.getElementById('current-power').textContent = `${powerValue.toFixed(2)} kW`;
-            
-            const directionEl = document.getElementById('power-direction');
-            const isConsumption = data.current_power < 0;
-            directionEl.className = `badge ${isConsumption ? 'bg-warning' : 'bg-success'}`;
-            directionEl.textContent = isConsumption ? 'Prelievo' : 'Immissione';
-        }
-
-        if (data.daily_energy !== undefined) {
-            document.getElementById('today-energy').textContent = `${data.daily_energy.toFixed(2)} kWh`;
-        }
-
-        if (data.last_update) {
-            document.getElementById('last-update').textContent = 
-                `Ultimo aggiornamento: ${new Date(data.last_update).toLocaleString('it-IT')}`;
-        }
+updateCurrentValues(data) {
+    // Gestione della potenza istantanea
+    if (data.current_power !== undefined && !isNaN(data.current_power)) {
+        const powerValue = Math.abs(data.current_power);
+        document.getElementById('current-power').textContent = `${powerValue.toFixed(2)} kW`;
+        
+        const directionEl = document.getElementById('power-direction');
+        const isConsumption = data.current_power < 0;
+        directionEl.className = `badge ${isConsumption ? 'bg-warning' : 'bg-success'}`;
+        directionEl.textContent = isConsumption ? 'Prelievo' : 'Immissione';
+    } else {
+        document.getElementById('current-power').textContent = '0.00 kW';
+        const directionEl = document.getElementById('power-direction');
+        directionEl.className = 'badge bg-secondary';
+        directionEl.textContent = 'Dato non disponibile';
+        console.warn('Invalid power value received:', data.current_power);
     }
 
-    updateChartData(measurements, startDate, endDate) {
+    // Gestione dell'energia giornaliera
+    if (data.daily_energy !== undefined && !isNaN(data.daily_energy)) {
+        document.getElementById('today-energy').textContent = `${data.daily_energy.toFixed(2)} kWh`;
+    } else {
+        document.getElementById('today-energy').textContent = '0.00 kWh';
+        console.warn('Invalid daily energy value received:', data.daily_energy);
+    }
+
+    // Gestione dell'ultimo aggiornamento
+    if (data.last_update && !isNaN(new Date(data.last_update).getTime())) {
+        document.getElementById('last-update').textContent = 
+            `Ultimo aggiornamento: ${new Date(data.last_update).toLocaleString('it-IT')}`;
+    } else {
+        document.getElementById('last-update').textContent = 'Ultimo aggiornamento: non disponibile';
+        console.warn('Invalid last update timestamp received:', data.last_update);
+    }
+}
+
+updateChartData(measurements, startDate, endDate) {
+    // Filtra i valori zero che durano meno di 5 minuti
+    let filteredData = [];
+    let lastValidValue = null;
+    let lastZeroTime = null;
+
+    measurements.forEach((m, i) => {
+        if (m.power === 0) {
+            if (lastValidValue !== null) {
+                // Se è il primo zero, salva il timestamp
+                if (lastZeroTime === null) {
+                    lastZeroTime = new Date(m.timestamp);
+                }
+                
+                // Se sono passati meno di 5 minuti, usa l'ultimo valore valido
+                const timeDiff = (new Date(m.timestamp) - lastZeroTime) / 1000;
+                if (timeDiff < 300) { // 300 secondi = 5 minuti
+                    filteredData.push({
+                        x: new Date(m.timestamp),
+                        y: lastValidValue
+                    });
+                    return;
+                }
+            }
+        } else {
+            lastValidValue = m.power;
+            lastZeroTime = null;
+        }
+
+        filteredData.push({
+            x: new Date(m.timestamp),
+            y: m.power
+        });
+    });
+
     // Aggiorna i dati in modo più fluido
-    this.chart.data.datasets[0].data = measurements.map(m => ({
-        x: new Date(m.timestamp),
-        y: m.power
-    }));
+    this.chart.data.datasets[0].data = filteredData;
 
     // Aggiorna gli assi senza animazione
     this.chart.options.scales.x.min = startDate;
@@ -491,6 +537,7 @@ class PowerChartManager {
         `${config.interval} secondi`;
     document.getElementById('aggregation-interval').textContent = intervalText;
 }
+
 
     updateStatistics(stats) {
         if (stats.average !== undefined) {

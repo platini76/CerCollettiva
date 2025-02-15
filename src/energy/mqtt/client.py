@@ -292,8 +292,9 @@ class EnergyMQTTClient:
                     self._retry_delay = min(self._retry_delay * 2, self._max_retry_delay)
 
         threading.Thread(target=reconnect_thread, daemon=True).start()
-            
+                
     def _on_message(self, client, userdata, msg):
+        """Callback per i messaggi ricevuti"""
         try:
             data = json.loads(msg.payload.decode('utf-8'))
             
@@ -304,32 +305,18 @@ class EnergyMQTTClient:
                 last_value = self._last_values.get(device_id)
                 
                 if current_power is not None:
-                    is_valid = True
-                    
-                    if last_value:
-                        power_diff = abs(current_power - last_value['power'])
-                        time_diff = (timezone.now() - last_value['timestamp']).total_seconds()
-                        
-                        # Ignora variazioni minori di 10W E inferiori al 50% del valore precedente
-                        MIN_POWER_CHANGE = 10  # Variazione minima significativa in W
-                        
-                        if time_diff < 2 and power_diff > MIN_POWER_CHANGE and power_diff > (last_value['power'] * 0.5):
-                            is_valid = False
-                            logger.warning(f"Variazione potenza significativa: {power_diff:.2f}W in {time_diff:.2f}s")
+                    # Se riceviamo uno 0 e abbiamo un valore precedente valido
+                    if current_power == 0 and last_value:
+                        time_diff = (timezone.now() - last_value['timestamp']).seconds
+                        # Se sono passati meno di 5 minuti, manteniamo il valore precedente
+                        if time_diff < 300:  # 300 secondi = 5 minuti
                             current_power = last_value['power']
+                            logger.info(f"  Ignorato valore zero, mantenuto precedente: {current_power:.1f}W")
                     
-                    if abs(current_power) > 100000:  # 100kW
-                        is_valid = False
-                        logger.warning(f"Valore potenza fuori range: {current_power}W")
-                        if last_value:
-                            current_power = last_value['power']
-                    
-                    if is_valid or not last_value:
-                        self._last_values[device_id] = {
-                            'power': current_power,
-                            'timestamp': timezone.now()
-                        }
-                    
+                    self._last_values[device_id] = {
+                        'power': current_power,
+                        'timestamp': timezone.now()
+                    }
                     logger.info(f"  Potenza Totale [W]: {current_power:.1f}")
                     
                 elif last_value and (timezone.now() - last_value['timestamp']).seconds < 120:
@@ -344,7 +331,8 @@ class EnergyMQTTClient:
             logger.error(f"Error decoding JSON from {msg.topic}: {e}")
             logger.error(f"Raw payload: {msg.payload}")
         except Exception as e:
-            logger.error(f"Error processing message on {msg.topic}: {str(e)}")
+            logger.error(f"Error processing message on {msg.topic}: {str(e)}")    
+
 
     def _subscribe_topics(self) -> None:
         """Gestisce le sottoscrizioni ai topic MQTT"""
