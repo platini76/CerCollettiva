@@ -116,26 +116,11 @@ canvas {
             <!-- Card Statistiche -->
             <div class="card mb-4 shadow-sm">
                 <div class="card-header">
-                    <h5 class="mb-0">Statistiche</h5>
+                    <h5 class="mb-0">Energia Oraria</h5>
                 </div>
                 <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-3 text-center">
-                            <h6 class="text-muted">Potenza Media</h6>
-                            <div id="avg-power" class="fs-4 fw-bold">-- kW</div>
-                        </div>
-                        <div class="col-md-3 text-center">
-                            <h6 class="text-muted">Potenza Massima</h6>
-                            <div id="max-power" class="fs-4 fw-bold">-- kW</div>
-                        </div>
-                        <div class="col-md-3 text-center">
-                            <h6 class="text-muted">Potenza Minima</h6>
-                            <div id="min-power" class="fs-4 fw-bold">-- kW</div>
-                        </div>
-                        <div class="col-md-3 text-center">
-                            <h6 class="text-muted">Campioni</h6>
-                            <div id="sample-count" class="fs-4 fw-bold">--</div>
-                        </div>
+                    <div class="chart-container" style="height: 200px;">
+                        <canvas id="hourlyEnergyChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -310,12 +295,13 @@ class PowerChartManager {
     constructor(plantId) {
         this.plantId = plantId;
         this.chart = null;
+        this.hourlyEnergyChart = null;  // Aggiunto per il nuovo grafico
         this.selectedRange = '24h';
         this.rangeConfigs = {
-            '5m': { minutes: 5, interval: 10 },    // dati ogni 10 secondi
-            '1h': { minutes: 60, interval: 60 },   // dati ogni minuto
-            '24h': { minutes: 1440, interval: 600 }, // dati ogni 10 minuti
-            '48h': { minutes: 2880, interval: 1800 } // dati ogni 30 minuti
+            '5m': { minutes: 5, interval: 10 },
+            '1h': { minutes: 60, interval: 60 },
+            '24h': { minutes: 1440, interval: 600 },
+            '48h': { minutes: 2880, interval: 1800 }
         };
         this.updateInterval = null;
         this.initialize();
@@ -323,6 +309,7 @@ class PowerChartManager {
 
     initialize() {
         this.setupChart();
+        this.setupHourlyEnergyChart(); // Aggiunto per inizializzare il nuovo grafico
         this.setupEventListeners();
         this.startUpdateInterval();
     }
@@ -393,155 +380,266 @@ class PowerChartManager {
         });
     }
 
+   
     async updateData() {
-    const chartContainer = document.querySelector('.chart-container');
-    chartContainer.classList.add('updating');
+        const chartContainer = document.querySelector('.chart-container');
+        chartContainer.classList.add('updating');
 
-    try {
-        const config = this.rangeConfigs[this.selectedRange];
-        const endDate = new Date();
-        const startDate = new Date(endDate - (config.minutes * 60 * 1000));
-
-        // Calcola le ore dalla differenza in minuti
-        const hours = config.minutes / 60;
-
-        const response = await fetch(
-            // Usa il percorso corretto che corrisponde a urls.py
-            `/api/plants/${this.plantId}/data/?hours=${hours}`
-        );
-
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
-
-        // Converti i dati nel formato atteso
-        const measurements = data.data.map(m => ({
-            timestamp: m.timestamp,
-            power: m.power / 1000.0 // Converti in kW
-        }));
-
-        // Aggiorna il grafico
-        if (measurements.length > 0) {
-            this.updateChartData(measurements, startDate, endDate);
-        }
-
-        // Aggiorna le statistiche
-        const stats = {
-            average: data.stats.avg_power / 1000.0, // Converti in kW
-            max: Math.max(...measurements.map(m => m.power)) / 1000.0,
-            min: Math.min(...measurements.map(m => m.power)) / 1000.0,
-            count: data.stats.total_points
-        };
-        this.updateStatistics(stats);
-
-        // Aggiorna i valori correnti
-        if (data.current_power !== undefined) {
-            this.updateCurrentValues({
-                current_power: data.current_power / 1000.0,
-                last_update: data.last_update
-            });
-        }
-
-        document.querySelector('.chart-error').style.display = 'none';
-
-    } catch (error) {
-        console.error('Errore nell\'aggiornamento:', error);
-        document.querySelector('.chart-error').style.display = 'block';
-    } finally {
-        chartContainer.classList.remove('updating');
-    }
-}
-
-updateCurrentValues(data) {
-    // Gestione della potenza istantanea
-    if (data.current_power !== undefined && !isNaN(data.current_power)) {
-        const powerValue = Math.abs(data.current_power);
-        document.getElementById('current-power').textContent = `${powerValue.toFixed(2)} kW`;
-        
-        const directionEl = document.getElementById('power-direction');
-        const isConsumption = data.current_power < 0;
-        directionEl.className = `badge ${isConsumption ? 'bg-warning' : 'bg-success'}`;
-        directionEl.textContent = isConsumption ? 'Prelievo' : 'Immissione';
-    } else {
-        document.getElementById('current-power').textContent = '0.00 kW';
-        const directionEl = document.getElementById('power-direction');
-        directionEl.className = 'badge bg-secondary';
-        directionEl.textContent = 'Dato non disponibile';
-        console.warn('Invalid power value received:', data.current_power);
-    }
-
-    // Gestione dell'energia giornaliera
-    if (data.daily_energy !== undefined && !isNaN(data.daily_energy)) {
-        document.getElementById('today-energy').textContent = `${data.daily_energy.toFixed(2)} kWh`;
-    } else {
-        document.getElementById('today-energy').textContent = '0.00 kWh';
-        console.warn('Invalid daily energy value received:', data.daily_energy);
-    }
-
-    // Gestione dell'ultimo aggiornamento
-    if (data.last_update && !isNaN(new Date(data.last_update).getTime())) {
-        document.getElementById('last-update').textContent = 
-            `Ultimo aggiornamento: ${new Date(data.last_update).toLocaleString('it-IT')}`;
-    } else {
-        document.getElementById('last-update').textContent = 'Ultimo aggiornamento: non disponibile';
-        console.warn('Invalid last update timestamp received:', data.last_update);
-    }
-}
-
-updateChartData(measurements, startDate, endDate) {
-    // Filtra i valori zero che durano meno di 5 minuti
-    let filteredData = [];
-    let lastValidValue = null;
-    let lastZeroTime = null;
-
-    measurements.forEach((m, i) => {
-        if (m.power === 0) {
-            if (lastValidValue !== null) {
-                // Se è il primo zero, salva il timestamp
-                if (lastZeroTime === null) {
-                    lastZeroTime = new Date(m.timestamp);
-                }
+        try {
+            // Richiesta per i dati MQTT (energia oraria e dati in tempo reale)
+            const mqttResponse = await fetch('/energy/api/plants/mqtt-data/');
+            if (!mqttResponse.ok) throw new Error(`HTTP error! status: ${mqttResponse.status}`);
+            const mqtt_data = await mqttResponse.json();
+            
+            const plant_data = mqtt_data[this.plantId];
+            
+            if (plant_data) {
+                // Aggiorna i valori correnti e l'energia oraria
+                this.updateCurrentValues({
+                    current_power: plant_data.drawn_power,
+                    daily_energy: plant_data.daily_energy,
+                    last_update: plant_data.last_update
+                });
                 
-                // Se sono passati meno di 5 minuti, usa l'ultimo valore valido
-                const timeDiff = (new Date(m.timestamp) - lastZeroTime) / 1000;
-                if (timeDiff < 300) { // 300 secondi = 5 minuti
-                    filteredData.push({
-                        x: new Date(m.timestamp),
-                        y: lastValidValue
-                    });
-                    return;
+                await this.updateHourlyEnergy();
+            }
+
+            // Richiesta per i dati storici del grafico della potenza
+            const config = this.rangeConfigs[this.selectedRange];
+            const hours = config.minutes / 60;
+            
+            const historyResponse = await fetch(`/api/plants/${this.plantId}/data/?hours=${hours}`);
+            if (!historyResponse.ok) throw new Error(`HTTP error! status: ${historyResponse.status}`);
+            const historyData = await historyResponse.json();
+
+            // Aggiorna il grafico della potenza con i dati storici
+            if (historyData.data && historyData.data.length > 0) {
+                const measurements = historyData.data.map(m => ({
+                    timestamp: m.timestamp,
+                    power: m.power / 1000.0 // Converti in kW
+                }));
+
+                const endDate = new Date();
+                const startDate = new Date(endDate - (config.minutes * 60 * 1000));
+                this.updateChartData(measurements, startDate, endDate);
+            }
+
+            document.querySelector('.chart-error').style.display = 'none';
+        } catch (error) {
+            console.error('Errore nell\'aggiornamento:', error);
+            document.querySelector('.chart-error').style.display = 'block';
+        } finally {
+            chartContainer.classList.remove('updating');
+        }
+    }
+
+    setupHourlyEnergyChart() {
+    const ctx = document.getElementById('hourlyEnergyChart').getContext('2d');
+    this.hourlyEnergyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Energia (kWh)',
+                data: [],
+                backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                borderColor: '#3b82f6',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(30, 41, 59, 0.9)',
+                    callbacks: {
+                        title: (items) => {
+                            const hour = items[0].label;
+                            return `Ora: ${hour}`;
+                        },
+                        label: (context) => {
+                            const value = context.raw || 0;
+                            return `Energia: ${value.toFixed(2)} kWh`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        color: 'rgba(71, 85, 105, 0.2)'
+                    },
+                    ticks: {
+                        color: '#94a3b8',
+                        maxRotation: 0,
+                        callback: (value) => {
+                            // Formatta l'ora come "HH:00"
+                            return value + ":00";
+                        }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(71, 85, 105, 0.2)'
+                    },
+                    ticks: {
+                        color: '#94a3b8',
+                        callback: value => `${value.toFixed(1)} kWh`
+                    }
                 }
             }
-        } else {
-            lastValidValue = m.power;
-            lastZeroTime = null;
         }
-
-        filteredData.push({
-            x: new Date(m.timestamp),
-            y: m.power
-        });
     });
-
-    // Aggiorna i dati in modo più fluido
-    this.chart.data.datasets[0].data = filteredData;
-
-    // Aggiorna gli assi senza animazione
-    this.chart.options.scales.x.min = startDate;
-    this.chart.options.scales.x.max = endDate;
-    
-    // Usa 'none' per l'aggiornamento e disabilita le animazioni
-    this.chart.options.animation = false;
-    this.chart.update('none');
-    this.chart.options.animation = true;  // Riabilita le animazioni per altri aggiornamenti
-
-    // Aggiorna l'intervallo di aggregazione
-    const config = this.rangeConfigs[this.selectedRange];
-    const intervalText = config.interval >= 60 ? 
-        `${config.interval / 60} minuti` : 
-        `${config.interval} secondi`;
-    document.getElementById('aggregation-interval').textContent = intervalText;
 }
 
+    async updateHourlyEnergy() {
+        try {
+            // Ottieni i dati delle ultime 24 ore
+            const response = await fetch(`/api/plants/${this.plantId}/data/?hours=24`);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+
+            // Organizza i dati per ora
+            const hourlyData = {};
+            // Inizializza tutte le ore a 0
+            for (let i = 0; i < 24; i++) {
+                const hour = i.toString().padStart(2, '0');
+                hourlyData[hour] = 0;
+            }
+
+            // Aggrega i dati per ora
+            if (data.data && data.data.length > 0) {
+                data.data.forEach(measurement => {
+                    const date = new Date(measurement.timestamp);
+                    const hour = date.getHours().toString().padStart(2, '0');
+                    const powerInKw = measurement.power / 1000.0; // Converti in kW
+                    if (powerInKw > 0) {
+                        // Calcola l'energia in kWh (potenza * tempo in ore)
+                        hourlyData[hour] += (powerInKw * (1/60)) // assume una misura al minuto
+                    }
+                });
+            }
+
+            // Prepara i dati per il grafico
+            const hours = Object.keys(hourlyData).sort();
+            const energyValues = hours.map(hour => Number(hourlyData[hour].toFixed(2)));
+
+            // Aggiorna il grafico
+            this.hourlyEnergyChart.data.labels = hours;
+            this.hourlyEnergyChart.data.datasets[0].data = energyValues;
+            this.hourlyEnergyChart.update('none');
+
+        } catch (error) {
+            console.error('Errore nel caricamento dei dati orari:', error);
+        }
+    }
+
+    updateCurrentValues(data) {
+        // Gestione della potenza istantanea
+        if (data.current_power !== undefined && !isNaN(data.current_power)) {
+            const powerValue = Math.abs(data.current_power);
+            document.getElementById('current-power').textContent = `${powerValue.toFixed(2)} kW`;
+            
+            const directionEl = document.getElementById('power-direction');
+            const isConsumption = data.current_power < 0;
+            directionEl.className = `badge ${isConsumption ? 'bg-warning' : 'bg-success'}`;
+            directionEl.textContent = isConsumption ? 'Prelievo' : 'Immissione';
+        } else {
+            document.getElementById('current-power').textContent = '0.00 kW';
+            const directionEl = document.getElementById('power-direction');
+            directionEl.className = 'badge bg-secondary';
+            directionEl.textContent = 'Dato non disponibile';
+            console.warn('Invalid power value received:', data.current_power);
+        }
+
+        // Debug: stampa l'intero oggetto data
+        console.log('Data ricevuta:', data);
+        
+        // Gestione dell'energia giornaliera
+        if (data.stats && data.stats.daily_energy !== undefined && !isNaN(data.stats.daily_energy)) {
+            console.log('Trovato daily_energy in stats:', data.stats.daily_energy);
+            const dailyEnergy = data.stats.daily_energy / 1000.0;
+            document.getElementById('today-energy').textContent = `${dailyEnergy.toFixed(2)} kWh`;
+        } else if (data.daily_energy !== undefined && !isNaN(data.daily_energy)) {
+            console.log('Trovato daily_energy diretto:', data.daily_energy);
+            document.getElementById('today-energy').textContent = `${data.daily_energy.toFixed(2)} kWh`;
+        } else {
+            console.log('Nessun valore valido trovato per daily_energy');
+            document.getElementById('today-energy').textContent = '0.00 kWh';
+        }
+
+        // Gestione dell'ultimo aggiornamento
+        if (data.last_update && !isNaN(new Date(data.last_update).getTime())) {
+            document.getElementById('last-update').textContent = 
+                `Ultimo aggiornamento: ${new Date(data.last_update).toLocaleString('it-IT')}`;
+        } else {
+            document.getElementById('last-update').textContent = 'Ultimo aggiornamento: non disponibile';
+            console.warn('Invalid last update timestamp received:', data.last_update);
+        }
+    }
+
+
+    updateChartData(measurements, startDate, endDate) {
+        // Filtra i valori zero che durano meno di 5 minuti
+        let filteredData = [];
+        let lastValidValue = null;
+        let lastZeroTime = null;
+
+        measurements.forEach((m, i) => {
+            if (m.power === 0) {
+                if (lastValidValue !== null) {
+                    // Se è il primo zero, salva il timestamp
+                    if (lastZeroTime === null) {
+                        lastZeroTime = new Date(m.timestamp);
+                    }
+                    
+                    // Se sono passati meno di 5 minuti, usa l'ultimo valore valido
+                    const timeDiff = (new Date(m.timestamp) - lastZeroTime) / 1000;
+                    if (timeDiff < 300) { // 300 secondi = 5 minuti
+                        filteredData.push({
+                            x: new Date(m.timestamp),
+                            y: lastValidValue
+                        });
+                        return;
+                    }
+                }
+            } else {
+                lastValidValue = m.power;
+                lastZeroTime = null;
+            }
+
+            filteredData.push({
+                x: new Date(m.timestamp),
+                y: m.power
+            });
+        });
+
+        // Aggiorna i dati in modo più fluido
+        this.chart.data.datasets[0].data = filteredData;
+
+        // Aggiorna gli assi senza animazione
+        this.chart.options.scales.x.min = startDate;
+        this.chart.options.scales.x.max = endDate;
+        
+        // Usa 'none' per l'aggiornamento e disabilita le animazioni
+        this.chart.options.animation = false;
+        this.chart.update('none');
+        this.chart.options.animation = true;  // Riabilita le animazioni per altri aggiornamenti
+
+        // Aggiorna l'intervallo di aggregazione
+        const config = this.rangeConfigs[this.selectedRange];
+        const intervalText = config.interval >= 60 ? 
+            `${config.interval / 60} minuti` : 
+            `${config.interval} secondi`;
+        document.getElementById('aggregation-interval').textContent = intervalText;
+    }
 
     updateStatistics(stats) {
         if (stats.average !== undefined) {
