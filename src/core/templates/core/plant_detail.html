@@ -356,7 +356,10 @@ class PowerChartManager {
                         callbacks: {
                             title: (items) => new Date(items[0].parsed.x).toLocaleString('it-IT'),
                             label: (context) => {
-                                const value = context.raw;
+                                // Verifica se il valore è definito
+                                if (context.parsed.y === undefined) return 'Valore non disponibile';
+                                
+                                const value = context.parsed.y;
                                 const sign = value < 0 ? 'Prelievo' : 'Immissione';
                                 return `${sign}: ${Math.abs(value).toFixed(2)} kW`;
                             }
