@@ -2,16 +2,15 @@
 
 ###########################################
 #  CerCollettiva - Installation Script   #
-#  Version: 2.0                          #
+#  Version: 1.0                          #
 #  Author: Andrea Bernardi               #
 #  Date: Febbraio 2025                   #
 ###########################################
 
 # Colori per output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 # Configurazione base
@@ -92,36 +91,122 @@ setup_virtualenv() {
     fi
 }
 
-# Configurazione Django
+# Funzione per configurare le impostazioni Django
+configure_django_settings() {
+    log "Configurazione impostazioni Django..."
+    
+    local settings_dir="$PROJECT_PATH/cercollettiva/settings"
+    local settings_file="$settings_dir/local.py"
+    
+    # Crea la directory settings se non esiste
+    mkdir -p "$settings_dir"
+    touch "$settings_dir/__init__.py"
+    
+    # Genera chiavi segrete
+    local django_secret_key=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')
+    local field_encryption_key=$(python -c '
+from cryptography.fernet import Fernet
+print(Fernet.generate_key().decode())
+')
+    # Crea file settings/local.py
+    cat > "$settings_file" << EOL
+from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+SECRET_KEY = '${django_secret_key}'  # Inserito direttamente
+FIELD_ENCRYPTION_KEY = '${field_encryption_key}'  # Inserito direttamente
+DEBUG = False
+
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '$(hostname -I | cut -d' ' -f1)']
+
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'encrypted_model_fields',
+    'crispy_forms',
+    'crispy_bootstrap5',
+    'rest_framework',
+    'channels',
+    'core',
+    'energy',
+    'users',
+    'documents',
+]
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'cercollettiva.urls'
+WSGI_APPLICATION = 'cercollettiva.wsgi.application'
+ASGI_APPLICATION = 'cercollettiva.asgi.application'
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
+}
+
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
+CRISPY_TEMPLATE_PACK = "bootstrap5"
+EOL
+
+    # Aggiorna la configurazione MQTT se necessario
+    local mqtt_file="$settings_dir/mqtt.py"
+    cat > "$mqtt_file" << EOL
+MQTT_BROKER = 'localhost'
+MQTT_PORT = 1883
+MQTT_USERNAME = 'cercollettiva'
+MQTT_PASSWORD = '$(openssl rand -base64 12)'
+EOL
+
+    chmod 600 "$settings_file"
+    chmod 600 "$mqtt_file"
+}
+
 setup_django() {
     log "Configurazione Django..."
     
+    # Configura le impostazioni
+    configure_django_settings
+    
+    # Crea directory necessarie
+    mkdir -p "$PROJECT_PATH/media"
+    mkdir -p "$PROJECT_PATH/staticfiles"
+    mkdir -p "$LOGS_PATH"
+    
+    # Inizializza database
     source "$VENV_PATH/bin/activate"
     cd "$PROJECT_PATH"
     
-# Crea file .env
-DJANGO_SECRET_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')
-FIELD_ENCRYPTION_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')
-
-cat > "$PROJECT_PATH/.env" << EOL
-DEBUG=False
-SECRET_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')
-ALLOWED_HOSTS=localhost,127.0.0.1,$(hostname -I | cut -d' ' -f1)
-DATABASE_URL=sqlite:///db.sqlite3
-MQTT_BROKER=localhost
-MQTT_PORT=1883
-MQTT_USERNAME=cercollettiva
-MQTT_PASSWORD=$(openssl rand -base64 12)
-TIME_ZONE=Europe/Rome
-LANGUAGE_CODE=it
-EOL
-
-    # Setup database e file statici
     python manage.py migrate
     python manage.py collectstatic --noinput
     
     # Crea superuser
-    echo -e "\n${YELLOW}Creazione account amministratore${NC}"
+    echo -e "\nCreazione account amministratore"
     python manage.py createsuperuser
 }
 
@@ -172,6 +257,7 @@ User=pi
 Group=www-data
 WorkingDirectory=$PROJECT_PATH
 Environment="PATH=$VENV_PATH/bin"
+Environment="DJANGO_SETTINGS_MODULE=cercollettiva.settings.local"
 ExecStart=$VENV_PATH/bin/gunicorn --workers 2 --bind 127.0.0.1:8000 cercollettiva.wsgi:application
 
 [Install]
@@ -187,10 +273,11 @@ EOL
 setup_mqtt() {
     log "Configurazione MQTT..."
     
-    MQTT_USER=$(grep MQTT_USERNAME .env | cut -d= -f2)
-    MQTT_PASS=$(grep MQTT_PASSWORD .env | cut -d= -f2)
+    # Estrai le credenziali MQTT dal file di configurazione
+    local mqtt_user="cercollettiva"
+    local mqtt_pass=$(openssl rand -base64 12)
     
-    sudo mosquitto_passwd -c /etc/mosquitto/passwd "$MQTT_USER" "$MQTT_PASS"
+    sudo mosquitto_passwd -c /etc/mosquitto/passwd "$mqtt_user" "$mqtt_pass"
     
     sudo tee /etc/mosquitto/conf.d/default.conf > /dev/null << EOL
 listener 1883
