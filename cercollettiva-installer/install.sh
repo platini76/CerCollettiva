@@ -4,7 +4,7 @@
 #  CerCollettiva - Installation Script   #
 #  Version: 1.0                          #
 #  Author: Andrea Bernardi               #
-#  Date: November 2024                   #
+#  Date: Febbraio 2025                   #
 ###########################################
 
 # Rileva il percorso dello script
