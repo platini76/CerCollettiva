@@ -17,3 +17,4 @@ django-oauth-toolkit==2.3.0
 drf-yasg==1.21.7
 requests==2.31.0
 geopy==2.4.1
+django-encrypted-model-fields==0.6.5
