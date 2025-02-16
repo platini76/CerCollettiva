@@ -109,7 +109,8 @@ from cryptography.fernet import Fernet
 print(Fernet.generate_key().decode())
 ')
     # Crea file settings/local.py
-    cat > "$settings_file" << EOL
+# Modifica la parte delle impostazioni Django in local.py
+cat > "$settings_file" << EOL
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -118,8 +119,8 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-SECRET_KEY = '${django_secret_key}'  # Inserito direttamente
-FIELD_ENCRYPTION_KEY = '${field_encryption_key}'  # Inserito direttamente
+SECRET_KEY = '${django_secret_key}'
+FIELD_ENCRYPTION_KEY = '${field_encryption_key}'
 DEBUG = False
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '$(hostname -I | cut -d' ' -f1)']
@@ -153,6 +154,23 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'cercollettiva.urls'
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
 WSGI_APPLICATION = 'cercollettiva.wsgi.application'
 ASGI_APPLICATION = 'cercollettiva.asgi.application'
 
@@ -162,6 +180,8 @@ DATABASES = {
         'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
+AUTH_USER_MODEL = 'users.CustomUser'
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
@@ -173,6 +193,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
 CRISPY_TEMPLATE_PACK = "bootstrap5"
 EOL
+
+
 
     # Aggiorna la configurazione MQTT se necessario
     local mqtt_file="$settings_dir/mqtt.py"
