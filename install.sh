@@ -15,7 +15,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Configurazione base
-APP_NAME="cercollettiva"
+APP_NAME="CerCollettiva"
 APP_ROOT="/home/pi"
 APP_PATH="$APP_ROOT/$APP_NAME"
 VENV_PATH="$APP_PATH/venv"

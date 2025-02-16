@@ -2,7 +2,8 @@
 import re, uuid, time, logging
 import paho.mqtt.client as mqtt
 #from energy.models import DeviceMeasurement, DeviceConfiguration
-from paho.mqtt.client import CallbackAPIVersion
+#from paho.mqtt.client import CallbackAPIVersion
+from paho.mqtt import client as mqtt
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
