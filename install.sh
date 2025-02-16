@@ -99,8 +99,11 @@ setup_django() {
     source "$VENV_PATH/bin/activate"
     cd "$PROJECT_PATH"
     
-    # Crea file .env
-    cat > .env << EOL
+# Crea file .env
+DJANGO_SECRET_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')
+FIELD_ENCRYPTION_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')
+
+cat > "$PROJECT_PATH/.env" << EOL
 DEBUG=False
 SECRET_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')
 ALLOWED_HOSTS=localhost,127.0.0.1,$(hostname -I | cut -d' ' -f1)
