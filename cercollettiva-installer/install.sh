@@ -45,13 +45,13 @@ main() {
     if [ "$EUID" -eq 0 ]; then
         echo "Non eseguire questo script come root"
         exit 1
-    }
+    fi
 
     # Verifica permessi directory
     if [ ! -w "$APP_ROOT" ]; then
         echo "Errore: Permessi insufficienti su $APP_ROOT"
         exit 1
-    }
+    fi
 
     # Crea file di lock
     LOCK_FILE="/tmp/cercollettiva_install.lock"
@@ -71,15 +71,11 @@ main() {
     fi
 
     # Sequenza di installazione
-    {
-        prepare_project_structure
-        install_system
-        setup_application
-        configure_services
-        finalize_installation
-    } || {
-        handle_error "Errore durante l'installazione"
-    }
+    prepare_project_structure || handle_error "Errore durante la preparazione della struttura"
+    install_system || handle_error "Errore durante l'installazione del sistema"
+    setup_application || handle_error "Errore durante il setup dell'applicazione"
+    configure_services || handle_error "Errore durante la configurazione dei servizi"
+    finalize_installation || handle_error "Errore durante la finalizzazione"
 
     # Rimuovi file di lock alla fine
     rm -f "$LOCK_FILE"
@@ -90,3 +86,4 @@ trap 'rm -f $LOCK_FILE; handle_error "Installazione interrotta dall'\''utente" 1
 
 # Avvio
 main "$@"
+EOL
