@@ -224,7 +224,16 @@ setup_django() {
     source "$VENV_PATH/bin/activate"
     cd "$PROJECT_PATH"
     
+    # Assicurati che tutte le app abbiano le loro migrazioni
+    python manage.py makemigrations users
+    python manage.py makemigrations core
+    python manage.py makemigrations energy
+    python manage.py makemigrations documents
+    
+    # Applica tutte le migrazioni
     python manage.py migrate
+    
+    # Raccolta file statici
     python manage.py collectstatic --noinput
     
     # Crea superuser
