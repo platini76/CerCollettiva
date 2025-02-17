@@ -2,7 +2,7 @@
 
 ###########################################
 #  CerCollettiva - Installation Script   #
-#  Version: 1.1                          #
+#  Version: 1.2                          #
 #  Author: Andrea Bernardi               #
 #  Date: Febbraio 2025                   #
 #  Modificato: Febbraio 2025             #
@@ -14,13 +14,16 @@ BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Configurazione base
+# Variabile per l'utente di sistema
+SYSTEM_USER=""
+
+# Configurazione base (verrà aggiornata dopo aver determinato l'utente)
 APP_NAME="CerCollettiva"
-APP_ROOT="/home/pi"
-APP_PATH="$APP_ROOT/$APP_NAME"
-VENV_PATH="$APP_PATH/venv"
-LOGS_PATH="$APP_PATH/logs"
-PROJECT_PATH="$APP_PATH/app"
+APP_ROOT=""  # Sarà impostato in setup_user
+APP_PATH=""  # Sarà impostato in setup_user
+VENV_PATH="" # Sarà impostato in setup_user
+LOGS_PATH="" # Sarà impostato in setup_user
+PROJECT_PATH="" # Sarà impostato in setup_user
 
 # Variabili aggiuntive per la configurazione di rete e sicurezza
 PUBLIC_DOMAIN=""
@@ -35,6 +38,39 @@ log() {
 error() {
     echo -e "${RED}[ERROR] $1${NC}"
     exit 1
+}
+
+# Configurazione dell'utente
+setup_user() {
+    log "Configurazione dell'utente..."
+    
+    # Determina l'utente corrente
+    local current_user=$(whoami)
+    
+    # Chiedi quale utente utilizzare
+    echo -e "Utente corrente: ${GREEN}$current_user${NC}"
+    read -p "Vuoi utilizzare l'utente corrente per l'installazione? (s/n): " use_current_user
+    
+    if [[ "$use_current_user" =~ ^[Ss]$ ]]; then
+        SYSTEM_USER="$current_user"
+    else
+        read -p "Inserisci il nome dell'utente da utilizzare: " SYSTEM_USER
+        
+        # Verifica che l'utente esista
+        if ! id "$SYSTEM_USER" &>/dev/null; then
+            error "L'utente $SYSTEM_USER non esiste. Crealo prima di continuare."
+        fi
+    fi
+    
+    # Aggiorna i percorsi di configurazione in base all'utente scelto
+    APP_ROOT="/home/$SYSTEM_USER"
+    APP_PATH="$APP_ROOT/$APP_NAME"
+    VENV_PATH="$APP_PATH/venv"
+    LOGS_PATH="$APP_PATH/logs"
+    PROJECT_PATH="$APP_PATH/app"
+    
+    log "L'installazione verrà eseguita per l'utente: ${GREEN}$SYSTEM_USER${NC}"
+    log "Directory di installazione: $APP_PATH"
 }
 
 # Verifica prerequisiti
@@ -115,6 +151,12 @@ install_dependencies() {
 setup_virtualenv() {
     log "Configurazione ambiente virtuale Python..."
     
+    # Crea la directory principale se non esiste
+    if [ ! -d "$APP_PATH" ]; then
+        mkdir -p "$APP_PATH"
+    fi
+    
+    # Crea e attiva l'ambiente virtuale
     python3 -m venv "$VENV_PATH"
     source "$VENV_PATH/bin/activate"
     
@@ -367,6 +409,9 @@ setup_django() {
     mkdir -p "$PROJECT_PATH/staticfiles"
     mkdir -p "$LOGS_PATH"
     
+    # Imposta i permessi corretti
+    sudo chown -R $SYSTEM_USER:$SYSTEM_USER "$APP_PATH"
+    
     # Inizializza database
     source "$VENV_PATH/bin/activate"
     cd "$PROJECT_PATH"
@@ -480,7 +525,7 @@ Description=CerCollettiva Gunicorn Daemon
 After=network.target postgresql.service
 
 [Service]
-User=pi
+User=$SYSTEM_USER
 Group=www-data
 WorkingDirectory=$PROJECT_PATH
 Environment="PATH=$VENV_PATH/bin"
@@ -532,7 +577,7 @@ setup_supervisor() {
 [program:cercollettiva_mqtt]
 command=$VENV_PATH/bin/python $PROJECT_PATH/manage.py mqtt_client
 directory=$PROJECT_PATH
-user=pi
+user=$SYSTEM_USER
 environment=DJANGO_SETTINGS_MODULE=cercollettiva.settings.local
 autostart=true
 autorestart=true
@@ -572,16 +617,35 @@ setup_firewall() {
     sudo ufw --force enable
 }
 
+# Verifica e aggiunge l'utente al gruppo www-data se necessario
+setup_user_permissions() {
+    log "Configurazione dei permessi dell'utente..."
+    
+    # Aggiungi l'utente al gruppo www-data se non è già presente
+    if ! groups "$SYSTEM_USER" | grep -q www-data; then
+        sudo usermod -a -G www-data "$SYSTEM_USER"
+        log "Utente $SYSTEM_USER aggiunto al gruppo www-data"
+    fi
+    
+    # Assicurati che l'utente abbia accesso alle directory necessarie
+    sudo chown -R "$SYSTEM_USER":www-data "$APP_PATH"
+    sudo chmod -R 750 "$APP_PATH"
+    sudo chmod -R 770 "$PROJECT_PATH/media"
+    sudo chmod -R 770 "$LOGS_PATH"
+}
+
 # Funzione principale
 main() {
     echo -e "${GREEN}=== Installazione CerCollettiva ===${NC}"
     
+    setup_user
     check_prerequisites
     collect_network_info
     install_dependencies
     setup_virtualenv
     setup_database
     setup_django
+    setup_user_permissions
     setup_nginx
     setup_gunicorn
     setup_mqtt
