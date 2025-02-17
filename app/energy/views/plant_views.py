@@ -22,10 +22,13 @@ class PlantListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         """
-        Override del queryset per includere i dati di potenza istantanea
+        Restituisce il queryset degli impianti.
+        Staff può vedere tutti gli impianti, utenti normali solo i propri.
         """
-        # Get base queryset
-        return Plant.objects.filter(owner=self.request.user).prefetch_related('devices')
+        base_queryset = Plant.objects.prefetch_related('devices')
+        if self.request.user.is_staff:
+            return base_queryset
+        return base_queryset.filter(owner=self.request.user)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -36,9 +39,12 @@ class PlantListView(LoginRequiredMixin, ListView):
             plants = self.get_queryset()
             devices_data = []
 
-            # Utilizziamo il nuovo metodo per ottenere la potenza totale del sistema
-            # Questo sostituisce il calcolo manuale precedente ed è più efficiente
-            total_power = Plant.get_total_system_power(user=self.request.user)
+            # Per gli amministratori, otteniamo la potenza totale di tutti gli impianti
+            if self.request.user.is_staff:
+                total_power = Plant.get_total_system_power()  # Senza filtro utente
+            else:
+                total_power = Plant.get_total_system_power(user=self.request.user)
+
             logger.info(f"Potenza totale sistema calcolata: {total_power} kW")
 
             # Iteriamo sugli impianti per raccogliere i dati dei dispositivi

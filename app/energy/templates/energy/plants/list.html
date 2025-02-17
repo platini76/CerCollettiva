@@ -12,6 +12,34 @@
     </div>
 </div>
 
+{% if user.is_staff %}
+<!-- Filtri per amministratori -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="get" class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label for="owner" class="form-label">Filtra per proprietario</label>
+                        <select name="owner" id="owner" class="form-select">
+                            <option value="">Tutti i proprietari</option>
+                            {% for owner in owners %}
+                                <option value="{{ owner.id }}" {% if selected_owner == owner.id %}selected{% endif %}>
+                                    {{ owner.username }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-primary w-100">Filtra</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Grid con grafici e statistiche -->
 <div class="row g-4 mb-4">
     <!-- Grafico Potenza -->
@@ -74,6 +102,9 @@
                     <tr>
                         <th>Nome</th>
                         <th>POD</th>
+                        {% if user.is_staff %}
+                        <th>Proprietario</th>
+                        {% endif %}
                         <th>Località</th>
                         <th>Potenza Istantanea</th>
                         <th>Energia Oggi</th>
@@ -90,6 +121,9 @@
                             </a>
                         </td>
                         <td>{{ plant.pod_code|default:"-" }}</td>
+                        {% if user.is_staff %}
+                        <td>{{ plant.owner.username }}</td>
+                        {% endif %}
                         <td>{{ plant.city|default:"-" }}</td>
                         <td>
                             <div class="d-flex flex-column gap-1">
@@ -150,7 +184,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="7" class="text-center py-4">
+                        <td colspan="{% if user.is_staff %}8{% else %}7{% endif %}" class="text-center py-4">
                             <div class="text-muted">
                                 <i class="bi bi-inbox me-2"></i>
                                 Nessun impianto trovato
