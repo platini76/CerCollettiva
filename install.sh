@@ -2,9 +2,10 @@
 
 ###########################################
 #  CerCollettiva - Installation Script   #
-#  Version: 1.0                          #
+#  Version: 1.1                          #
 #  Author: Andrea Bernardi               #
 #  Date: Febbraio 2025                   #
+#  Modificato: Febbraio 2025             #
 ###########################################
 
 # Colori per output
@@ -20,6 +21,11 @@ APP_PATH="$APP_ROOT/$APP_NAME"
 VENV_PATH="$APP_PATH/venv"
 LOGS_PATH="$APP_PATH/logs"
 PROJECT_PATH="$APP_PATH/app"
+
+# Variabili aggiuntive per la configurazione di rete e sicurezza
+PUBLIC_DOMAIN=""
+PUBLIC_IP=""
+USE_SSL=false
 
 # Funzione di logging
 log() {
@@ -57,6 +63,29 @@ check_prerequisites() {
     fi
 }
 
+# Raccolta informazioni per l'esposizione su internet
+collect_network_info() {
+    log "Raccolta informazioni per l'esposizione su internet..."
+    
+    # Chiedi all'utente se vuole esporre l'applicazione su internet
+    read -p "Vuoi esporre l'applicazione su internet? (s/n): " expose_online
+    if [[ "$expose_online" =~ ^[Ss]$ ]]; then
+        # Chiedi informazioni sul dominio o IP pubblico
+        read -p "Hai un dominio per questa applicazione? (s/n): " has_domain
+        if [[ "$has_domain" =~ ^[Ss]$ ]]; then
+            read -p "Inserisci il tuo dominio (es. cercollettiva.example.com): " PUBLIC_DOMAIN
+        else
+            read -p "Inserisci il tuo indirizzo IP pubblico: " PUBLIC_IP
+        fi
+        
+        # Chiedi se configurare SSL/HTTPS
+        read -p "Vuoi configurare SSL/HTTPS per una connessione sicura? (s/n): " configure_ssl
+        if [[ "$configure_ssl" =~ ^[Ss]$ ]]; then
+            USE_SSL=true
+        fi
+    fi
+}
+
 # Installazione dipendenze
 install_dependencies() {
     log "Installazione dipendenze di sistema..."
@@ -71,6 +100,11 @@ install_dependencies() {
         supervisor \
         mosquitto \
         mosquitto-clients
+
+    # Installa certbot per SSL se richiesto
+    if [ "$USE_SSL" = true ]; then
+        sudo apt install -y certbot python3-certbot-nginx
+    fi
 
     if [ $? -ne 0 ]; then
         error "Errore durante l'installazione delle dipendenze"
@@ -95,10 +129,17 @@ setup_virtualenv() {
 setup_database() {
     log "Configurazione PostgreSQL..."
     
+    # Genera una password sicura per il database
+    local db_password=$(openssl rand -base64 12)
+    
     # Crea utente e database
-    sudo -u postgres psql -c "CREATE USER cercollettiva WITH PASSWORD 'cercollettiva';"
+    sudo -u postgres psql -c "CREATE USER cercollettiva WITH PASSWORD '${db_password}';"
     sudo -u postgres psql -c "CREATE DATABASE cercollettiva OWNER cercollettiva;"
     sudo -u postgres psql -c "ALTER USER cercollettiva CREATEDB;"
+    
+    # Salva la password in un file separato per uso successivo
+    echo "DB_PASSWORD=${db_password}" > "$APP_PATH/.env"
+    chmod 600 "$APP_PATH/.env"
 }
 
 # Funzione per configurare le impostazioni Django
@@ -118,9 +159,37 @@ configure_django_settings() {
 from cryptography.fernet import Fernet
 print(Fernet.generate_key().decode())
 ')
+
+    # Prepara l'array ALLOWED_HOSTS
+    local allowed_hosts="['localhost', '127.0.0.1', '$(hostname -I | cut -d' ' -f1)'"
+    
+    if [ -n "$PUBLIC_DOMAIN" ]; then
+        allowed_hosts="$allowed_hosts, '$PUBLIC_DOMAIN'"
+    fi
+    
+    if [ -n "$PUBLIC_IP" ]; then
+        allowed_hosts="$allowed_hosts, '$PUBLIC_IP'"
+    fi
+    
+    allowed_hosts="$allowed_hosts]"
+    
+    # Prepara la lista CSRF_TRUSTED_ORIGINS se SSL è abilitato
+    local csrf_trusted_origins=""
+    if [ "$USE_SSL" = true ] && [ -n "$PUBLIC_DOMAIN" ]; then
+        csrf_trusted_origins="CSRF_TRUSTED_ORIGINS = ['https://$PUBLIC_DOMAIN']"
+    elif [ "$USE_SSL" = true ] && [ -n "$PUBLIC_IP" ]; then
+        csrf_trusted_origins="CSRF_TRUSTED_ORIGINS = ['https://$PUBLIC_IP']"
+    elif [ -n "$PUBLIC_DOMAIN" ]; then
+        csrf_trusted_origins="CSRF_TRUSTED_ORIGINS = ['http://$PUBLIC_DOMAIN']"
+    elif [ -n "$PUBLIC_IP" ]; then
+        csrf_trusted_origins="CSRF_TRUSTED_ORIGINS = ['http://$PUBLIC_IP']"
+    fi
+    
+    # Leggi password DB dal file .env
+    source "$APP_PATH/.env"
+    
     # Crea file settings/local.py
-# Modifica la parte delle impostazioni Django in local.py
-cat > "$settings_file" << EOL
+    cat > "$settings_file" << EOL
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -133,7 +202,22 @@ SECRET_KEY = '${django_secret_key}'
 FIELD_ENCRYPTION_KEY = '${field_encryption_key}'
 DEBUG = False
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '$(hostname -I | cut -d' ' -f1)']
+ALLOWED_HOSTS = $allowed_hosts
+$csrf_trusted_origins
+
+# Impostazioni di sicurezza dei cookie
+SESSION_COOKIE_SECURE = ${USE_SSL}
+CSRF_COOKIE_SECURE = ${USE_SSL}
+SECURE_SSL_REDIRECT = ${USE_SSL}
+SECURE_HSTS_SECONDS = 31536000 if ${USE_SSL} else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = ${USE_SSL}
+SECURE_HSTS_PRELOAD = ${USE_SSL}
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if ${USE_SSL} else None
+
+# Sicurezza aggiuntiva
+X_FRAME_OPTIONS = 'DENY'
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -189,11 +273,23 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'cercollettiva',
         'USER': 'cercollettiva',
-        'PASSWORD': 'cercollettiva',
+        'PASSWORD': '${DB_PASSWORD}',
         'HOST': 'localhost',
         'PORT': '5432',
     }
 }
+
+# Impostazioni per crittografia dei dati sensibili
+ENCRYPTED_FIELDS_KEYDIR = os.path.join(BASE_DIR, 'keydir')
+
+# Password validation
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+     'OPTIONS': {'min_length': 10}},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
 
 AUTH_USER_MODEL = 'users.CustomUser'
 
@@ -206,21 +302,57 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
 CRISPY_TEMPLATE_PACK = "bootstrap5"
+
+# Impostazioni di sicurezza per il superamento del GDPR
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5MB
+
+# Impostazioni di logging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'file': {
+            'level': 'WARNING',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join('${LOGS_PATH}', 'django.log'),
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['file'],
+            'level': 'WARNING',
+            'propagate': True,
+        },
+    },
+}
 EOL
 
-
-
-    # Aggiorna la configurazione MQTT se necessario
+    # Configurazione directory per le chiavi di crittografia
+    mkdir -p "$PROJECT_PATH/keydir"
+    chmod 700 "$PROJECT_PATH/keydir"
+    
+    # Aggiorna la configurazione MQTT
     local mqtt_file="$settings_dir/mqtt.py"
+    local mqtt_password=$(openssl rand -base64 12)
     cat > "$mqtt_file" << EOL
 MQTT_BROKER = 'localhost'
 MQTT_PORT = 1883
 MQTT_USERNAME = 'cercollettiva'
-MQTT_PASSWORD = '$(openssl rand -base64 12)'
+MQTT_PASSWORD = '${mqtt_password}'
 EOL
 
     chmod 600 "$settings_file"
     chmod 600 "$mqtt_file"
+    
+    # Salva mqtt password in .env
+    echo "MQTT_PASSWORD=${mqtt_password}" >> "$APP_PATH/.env"
 }
 
 setup_django() {
@@ -266,26 +398,58 @@ setup_django() {
 setup_nginx() {
     log "Configurazione Nginx..."
     
+    local protocol="http"
+    local server_name="_"
+    
+    # Configura il server_name basato sul dominio o IP pubblico
+    if [ -n "$PUBLIC_DOMAIN" ]; then
+        server_name="$PUBLIC_DOMAIN"
+    elif [ -n "$PUBLIC_IP" ]; then
+        server_name="$PUBLIC_IP"
+    fi
+    
+    # Crea la configurazione Nginx 
     sudo tee /etc/nginx/sites-available/cercollettiva > /dev/null << EOL
 server {
     listen 80;
-    server_name _;
+    server_name ${server_name};
     
+    # Logging
+    access_log /var/log/nginx/cercollettiva_access.log;
+    error_log /var/log/nginx/cercollettiva_error.log;
+    
+    # Limitazione della dimensione del corpo delle richieste
+    client_max_body_size 10M;
+    
+    # Configurazione dei file statici
     location /static/ {
         alias $PROJECT_PATH/staticfiles/;
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000";
     }
 
     location /media/ {
         alias $PROJECT_PATH/media/;
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800";
     }
 
+    # Proxy per l'applicazione Django
     location / {
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
+        
+        # Impostazioni di sicurezza
+        proxy_cookie_path / "/; HTTPOnly; Secure";
+        add_header X-Content-Type-Options nosniff;
+        add_header X-XSS-Protection "1; mode=block";
+        add_header X-Frame-Options DENY;
     }
 }
 EOL
@@ -293,6 +457,16 @@ EOL
     sudo ln -sf /etc/nginx/sites-available/cercollettiva /etc/nginx/sites-enabled/
     sudo rm -f /etc/nginx/sites-enabled/default
     sudo systemctl restart nginx
+    
+    # Configura SSL se richiesto
+    if [ "$USE_SSL" = true ]; then
+        if [ -n "$PUBLIC_DOMAIN" ]; then
+            sudo certbot --nginx -d "$PUBLIC_DOMAIN" --non-interactive --agree-tos --email admin@"$PUBLIC_DOMAIN" --redirect
+        elif [ -n "$PUBLIC_IP" ]; then
+            log "${RED}AVVISO: Non è possibile ottenere un certificato SSL per un indirizzo IP. SSL non configurato.${NC}"
+            log "${RED}Si consiglia di utilizzare un nome di dominio per una configurazione SSL sicura.${NC}"
+        fi
+    fi
 }
 
 # Configurazione Gunicorn
@@ -302,7 +476,7 @@ setup_gunicorn() {
     sudo tee /etc/systemd/system/gunicorn.service > /dev/null << EOL
 [Unit]
 Description=CerCollettiva Gunicorn Daemon
-After=network.target
+After=network.target postgresql.service
 
 [Service]
 User=pi
@@ -310,7 +484,9 @@ Group=www-data
 WorkingDirectory=$PROJECT_PATH
 Environment="PATH=$VENV_PATH/bin"
 Environment="DJANGO_SETTINGS_MODULE=cercollettiva.settings.local"
-ExecStart=$VENV_PATH/bin/gunicorn --workers 2 --bind 127.0.0.1:8000 cercollettiva.wsgi:application
+ExecStart=$VENV_PATH/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 cercollettiva.wsgi:application
+Restart=on-failure
+RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
@@ -325,19 +501,26 @@ EOL
 setup_mqtt() {
     log "Configurazione MQTT..."
     
-    # Estrai le credenziali MQTT dal file di configurazione
+    # Estrai le credenziali MQTT dal file .env
+    source "$APP_PATH/.env"
     local mqtt_user="cercollettiva"
-    local mqtt_pass=$(openssl rand -base64 12)
     
-    sudo mosquitto_passwd -c /etc/mosquitto/passwd "$mqtt_user" "$mqtt_pass"
+    sudo mosquitto_passwd -c /etc/mosquitto/passwd "$mqtt_user" "$MQTT_PASSWORD"
     
     sudo tee /etc/mosquitto/conf.d/default.conf > /dev/null << EOL
-listener 1883
+listener 1883 localhost
 allow_anonymous false
 password_file /etc/mosquitto/passwd
+
+# Logging
+log_dest file /var/log/mosquitto/mosquitto.log
+connection_messages true
+log_timestamp true
 EOL
 
+    # Assicura che il servizio Mosquitto sia configurato correttamente
     sudo systemctl restart mosquitto
+    sudo systemctl enable mosquitto
 }
 
 # Configurazione Supervisor per processi MQTT
@@ -349,14 +532,43 @@ setup_supervisor() {
 command=$VENV_PATH/bin/python $PROJECT_PATH/manage.py mqtt_client
 directory=$PROJECT_PATH
 user=pi
+environment=DJANGO_SETTINGS_MODULE=cercollettiva.settings.local
 autostart=true
 autorestart=true
+startretries=3
 stdout_logfile=$LOGS_PATH/mqtt.log
-redirect_stderr=true
+stderr_logfile=$LOGS_PATH/mqtt_error.log
 EOL
 
     sudo supervisorctl reread
     sudo supervisorctl update
+}
+
+# Configurazione del firewall
+setup_firewall() {
+    log "Configurazione del firewall..."
+    
+    # Installa ufw se non è presente
+    if ! command -v ufw &> /dev/null; then
+        sudo apt install -y ufw
+    fi
+    
+    # Configura regole di base
+    sudo ufw default deny incoming
+    sudo ufw default allow outgoing
+    
+    # Consenti SSH
+    sudo ufw allow ssh
+    
+    # Consenti HTTP e HTTPS
+    sudo ufw allow 80/tcp
+    sudo ufw allow 443/tcp
+    
+    # Limita l'accesso MQTT solo al localhost
+    sudo ufw deny 1883/tcp
+    
+    # Abilita il firewall
+    sudo ufw --force enable
 }
 
 # Funzione principale
@@ -364,6 +576,7 @@ main() {
     echo -e "${GREEN}=== Installazione CerCollettiva ===${NC}"
     
     check_prerequisites
+    collect_network_info
     install_dependencies
     setup_virtualenv
     setup_database
@@ -372,10 +585,37 @@ main() {
     setup_gunicorn
     setup_mqtt
     setup_supervisor
+    setup_firewall
     
     echo -e "\n${GREEN}=== Installazione completata! ===${NC}"
-    echo -e "Accedi all'applicazione: http://$(hostname -I | cut -d' ' -f1)"
-    echo -e "Pannello admin: http://$(hostname -I | cut -d' ' -f1)/admin"
+    
+    # Mostra le informazioni di accesso all'applicazione
+    if [ "$USE_SSL" = true ] && [ -n "$PUBLIC_DOMAIN" ]; then
+        echo -e "Accedi all'applicazione: https://$PUBLIC_DOMAIN"
+        echo -e "Pannello admin: https://$PUBLIC_DOMAIN/admin"
+    elif [ -n "$PUBLIC_DOMAIN" ]; then
+        echo -e "Accedi all'applicazione: http://$PUBLIC_DOMAIN"
+        echo -e "Pannello admin: http://$PUBLIC_DOMAIN/admin"
+    elif [ "$USE_SSL" = true ] && [ -n "$PUBLIC_IP" ]; then
+        echo -e "Accedi all'applicazione: https://$PUBLIC_IP"
+        echo -e "Pannello admin: https://$PUBLIC_IP/admin"
+    elif [ -n "$PUBLIC_IP" ]; then
+        echo -e "Accedi all'applicazione: http://$PUBLIC_IP"
+        echo -e "Pannello admin: http://$PUBLIC_IP/admin"
+    else
+        echo -e "Accedi all'applicazione: http://$(hostname -I | cut -d' ' -f1)"
+        echo -e "Pannello admin: http://$(hostname -I | cut -d' ' -f1)/admin"
+    fi
+    
+    echo -e "\n${BLUE}=== Informazioni di sicurezza ===${NC}"
+    echo -e "Assicurati di configurare un backup regolare del database e dei file di configurazione."
+    echo -e "Rivedi periodicamente i log in $LOGS_PATH per identificare eventuali problemi."
+    echo -e "Esegui regolarmente gli aggiornamenti di sicurezza con 'sudo apt update && sudo apt upgrade'."
+    
+    if [ "$USE_SSL" = false ]; then
+        echo -e "\n${RED}AVVISO: L'applicazione non è configurata con SSL/HTTPS.${NC}"
+        echo -e "${RED}Per una maggiore sicurezza e conformità al GDPR, si consiglia di configurare HTTPS.${NC}"
+    fi
 }
 
 # Avvio
