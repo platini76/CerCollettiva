@@ -66,7 +66,8 @@ install_dependencies() {
         python3-pip \
         python3-venv \
         nginx \
-        sqlite3 \
+        postgresql \
+        postgresql-contrib \
         supervisor \
         mosquitto \
         mosquitto-clients
@@ -89,6 +90,15 @@ setup_virtualenv() {
     if [ $? -ne 0 ]; then
         error "Errore durante l'installazione delle dipendenze Python"
     fi
+}
+
+setup_database() {
+    log "Configurazione PostgreSQL..."
+    
+    # Crea utente e database
+    sudo -u postgres psql -c "CREATE USER cercollettiva WITH PASSWORD 'cercollettiva';"
+    sudo -u postgres psql -c "CREATE DATABASE cercollettiva OWNER cercollettiva;"
+    sudo -u postgres psql -c "ALTER USER cercollettiva CREATEDB;"
 }
 
 # Funzione per configurare le impostazioni Django
@@ -176,8 +186,12 @@ ASGI_APPLICATION = 'cercollettiva.asgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'cercollettiva',
+        'USER': 'cercollettiva',
+        'PASSWORD': 'cercollettiva',
+        'HOST': 'localhost',
+        'PORT': '5432',
     }
 }
 
@@ -230,8 +244,15 @@ setup_django() {
     python manage.py makemigrations energy
     python manage.py makemigrations documents
     
-    # Applica tutte le migrazioni
-    python manage.py migrate
+    # Applica le migrazioni nell'ordine corretto
+    python manage.py migrate users
+    python manage.py migrate auth
+    python manage.py migrate admin
+    python manage.py migrate contenttypes
+    python manage.py migrate sessions
+    python manage.py migrate core
+    python manage.py migrate energy
+    python manage.py migrate documents
     
     # Raccolta file statici
     python manage.py collectstatic --noinput
@@ -345,6 +366,7 @@ main() {
     check_prerequisites
     install_dependencies
     setup_virtualenv
+    setup_database
     setup_django
     setup_nginx
     setup_gunicorn
