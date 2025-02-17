@@ -227,6 +227,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'encrypted_model_fields',
+    'widget_tweaks',
     'crispy_forms',
     'crispy_bootstrap5',
     'rest_framework',
