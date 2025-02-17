@@ -9,11 +9,14 @@ from django.urls import reverse_lazy
 from django.utils import timezone
 from datetime import timedelta
 from django.db.models import Sum, Max
+from django.contrib.auth import get_user_model
+from django import forms
 from core.models import Plant
 from ..models import DeviceConfiguration, DeviceMeasurement
 from django.views.generic import ListView, CreateView, DetailView
 
 logger = logging.getLogger(__name__)
+
 
 class PlantListView(LoginRequiredMixin, ListView):
     model = Plant
@@ -23,10 +26,14 @@ class PlantListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         """
         Restituisce il queryset degli impianti.
-        Staff può vedere tutti gli impianti, utenti normali solo i propri.
+        Staff può vedere tutti gli impianti o filtrati per proprietario,
+        utenti normali solo i propri.
         """
-        base_queryset = Plant.objects.prefetch_related('devices')
+        base_queryset = Plant.objects.prefetch_related('devices').select_related('owner')
         if self.request.user.is_staff:
+            owner_id = self.request.GET.get('owner')
+            if owner_id:
+                return base_queryset.filter(owner_id=owner_id)
             return base_queryset
         return base_queryset.filter(owner=self.request.user)
 
@@ -35,13 +42,23 @@ class PlantListView(LoginRequiredMixin, ListView):
         now = timezone.localtime()
         time_threshold = now - timedelta(minutes=5)
 
+        # Aggiungi lista proprietari per il filtro admin
+        if self.request.user.is_staff:
+            User = get_user_model()
+            context['owners'] = User.objects.filter(plants__isnull=False).distinct()
+            context['selected_owner'] = self.request.GET.get('owner')
+
         try:
             plants = self.get_queryset()
             devices_data = []
 
-            # Per gli amministratori, otteniamo la potenza totale di tutti gli impianti
+            # Per gli amministratori, otteniamo la potenza totale in base al filtro
             if self.request.user.is_staff:
-                total_power = Plant.get_total_system_power()  # Senza filtro utente
+                owner_id = self.request.GET.get('owner')
+                if owner_id:
+                    total_power = Plant.get_total_system_power(user_id=owner_id)
+                else:
+                    total_power = Plant.get_total_system_power()
             else:
                 total_power = Plant.get_total_system_power(user=self.request.user)
 
@@ -79,7 +96,7 @@ class PlantListView(LoginRequiredMixin, ListView):
                                 else None
                     })
 
-            # Calcola l'energia totale giornaliera (questo rimane invariato)
+            # Calcola l'energia totale giornaliera
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             total_energy = DeviceMeasurement.objects.filter(
                 device__plant__in=plants,
@@ -88,8 +105,6 @@ class PlantListView(LoginRequiredMixin, ListView):
 
             logger.info(f"Daily energy consumption: {total_energy:.2f} kWh")
 
-            # Aggiorna il context con i dati calcolati
-            # Nota: total_power è già in kW, non serve più convertire
             context.update({
                 'devices': devices_data,
                 'mqtt_data': {'drawn_power': total_power},
@@ -171,6 +186,14 @@ class PlantDetailView(LoginRequiredMixin, DetailView):
     template_name = 'energy/plants/detail.html'
     context_object_name = 'plant'
 
+    def get_queryset(self):
+        """
+        Limita l'accesso agli impianti in base ai permessi dell'utente
+        """
+        if self.request.user.is_staff:
+            return Plant.objects.all()
+        return Plant.objects.filter(owner=self.request.user)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         plant = self.get_object()
@@ -247,7 +270,12 @@ class PlantDetailView(LoginRequiredMixin, DetailView):
 def plant_delete(request, pk):
     if request.method == 'POST':
         try:
-            plant = get_object_or_404(Plant, pk=pk, owner=request.user)
+            # Permetti agli admin di eliminare qualsiasi impianto
+            if request.user.is_staff:
+                plant = get_object_or_404(Plant, pk=pk)
+            else:
+                plant = get_object_or_404(Plant, pk=pk, owner=request.user)
+                
             plant_name = plant.name
             plant.delete()
             logger.info(f"Impianto {plant_name} (ID: {pk}) eliminato dall'utente {request.user}")
@@ -295,10 +323,17 @@ def plant_mqtt_data(request, plant_id=None):
             time_threshold = now - timedelta(minutes=5)
             aggregation_minutes = 1
 
+        # Modifica la query per permettere agli admin di vedere tutti gli impianti
         if plant_id:
-            plants = Plant.objects.filter(id=plant_id, owner=request.user)
+            if request.user.is_staff:
+                plants = Plant.objects.filter(id=plant_id)
+            else:
+                plants = Plant.objects.filter(id=plant_id, owner=request.user)
         else:
-            plants = Plant.objects.filter(owner=request.user)
+            if request.user.is_staff:
+                plants = Plant.objects.all()
+            else:
+                plants = Plant.objects.filter(owner=request.user)
 
         response_data = {}
 
