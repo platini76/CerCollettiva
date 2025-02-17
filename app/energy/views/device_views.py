@@ -71,7 +71,7 @@ class DeviceListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         context['plants'] = Plant.objects.filter(owner=self.request.user)
         return context
-
+    
 class DeviceCreateView(LoginRequiredMixin, CreateView):
     model = DeviceConfiguration
     template_name = 'energy/devices/create.html'
@@ -81,8 +81,15 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
         
-        # Filtra gli impianti per mostrare solo quelli dell'utente corrente
-        form.fields['plant'].queryset = Plant.objects.filter(owner=self.request.user)
+        # Filtra gli impianti in base al ruolo dell'utente
+        if self.request.user.is_staff:
+            # Gli amministratori possono vedere tutti gli impianti esistenti nel sistema
+            form.fields['plant'].queryset = Plant.objects.all().select_related('owner').order_by('owner__username', 'name')
+            # Aggiungi il nome del proprietario al display dell'impianto
+            form.fields['plant'].label_from_instance = lambda obj: f"{obj.name} (Proprietario: {obj.owner.username})"
+        else:
+            # Gli utenti normali vedono solo i propri impianti
+            form.fields['plant'].queryset = Plant.objects.filter(owner=self.request.user)
         
         # Genera un nuovo Device ID
         last_device = DeviceConfiguration.objects.order_by('-device_id').first()
@@ -114,6 +121,24 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
 
         return form
 
+    def dispatch(self, request, *args, **kwargs):
+        try:
+            if request.user.is_staff:
+                # Per gli amministratori, verifica se esistono impianti nel sistema
+                if not Plant.objects.exists():
+                    messages.warning(request, 'Non ci sono impianti nel sistema')
+                    return redirect('energy:plants')
+            else:
+                # Per gli utenti normali, verifica solo i propri impianti
+                if not Plant.objects.filter(owner=request.user).exists():
+                    messages.warning(request, 'Devi prima creare un impianto')
+                    return redirect('energy:plants')
+            return super().dispatch(request, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Errore nel dispatch della view: {str(e)}")
+            messages.error(request, 'Si è verificato un errore')
+            return redirect('energy:devices')
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         
@@ -127,9 +152,14 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
         context.update({
             'supported_vendors': [(v, v) for v in supported_vendors],
             'supported_models': supported_models,
-            'supported_models_json': json.dumps(supported_models),
-            'plants': Plant.objects.filter(owner=self.request.user)
+            'supported_models_json': json.dumps(supported_models)
         })
+        
+        # Aggiungi la lista degli impianti al contesto in base al ruolo
+        if self.request.user.is_staff:
+            context['plants'] = Plant.objects.all().select_related('owner')
+        else:
+            context['plants'] = Plant.objects.filter(owner=self.request.user)
         
         return context
 
@@ -172,18 +202,6 @@ class DeviceCreateView(LoginRequiredMixin, CreateView):
             logger.error(f"Errore durante il salvataggio del dispositivo: {str(e)}")
             messages.error(self.request, f'Errore nella creazione del dispositivo: {str(e)}')
             return self.form_invalid(form)
-        
-    def dispatch(self, request, *args, **kwargs):
-        try:
-            # Verifica che l'utente abbia almeno un impianto
-            if not Plant.objects.filter(owner=request.user).exists():
-                messages.warning(request, 'Devi prima creare un impianto')
-                return redirect('energy:plants')
-            return super().dispatch(request, *args, **kwargs)
-        except Exception as e:
-            logger.error(f"Errore nel dispatch della view: {str(e)}")
-            messages.error(request, 'Si è verificato un errore')
-            return redirect('energy:devices')        
 
 class DeviceDetailView(LoginRequiredMixin, UpdateView):
     model = DeviceConfiguration
