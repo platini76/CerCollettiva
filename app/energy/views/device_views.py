@@ -45,10 +45,14 @@ class DeviceListView(LoginRequiredMixin, ListView):
             return redirect('energy:devices')
 
     def get_queryset(self):
-        # Get devices for current user with plant data
-        queryset = DeviceConfiguration.objects.filter(
-            plant__owner=self.request.user
-        ).select_related('plant')
+        # Get devices based on user role
+        base_queryset = DeviceConfiguration.objects.select_related('plant')
+        
+        # Admin users can see all devices, normal users only their own
+        if self.request.user.is_staff:
+            queryset = base_queryset
+        else:
+            queryset = base_queryset.filter(plant__owner=self.request.user)
 
         # Update online status for each device
         for device in queryset:
@@ -69,7 +73,10 @@ class DeviceListView(LoginRequiredMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['plants'] = Plant.objects.filter(owner=self.request.user)
+        if self.request.user.is_staff:
+            context['plants'] = Plant.objects.all().select_related('owner')
+        else:
+            context['plants'] = Plant.objects.filter(owner=self.request.user)
         return context
     
 class DeviceCreateView(LoginRequiredMixin, CreateView):
@@ -250,6 +257,8 @@ class DeviceDetailView(LoginRequiredMixin, UpdateView):
         return form
 
     def get_queryset(self):
+        if self.request.user.is_staff:
+            return DeviceConfiguration.objects.all().select_related('plant')
         return DeviceConfiguration.objects.filter(
             plant__owner=self.request.user
         ).select_related('plant')
@@ -335,9 +344,10 @@ class MeasurementListView(LoginRequiredMixin, ListView):
     paginate_by = 50
 
     def get_queryset(self):
-        return DeviceMeasurement.objects.select_related(
-            'device', 'plant'
-        ).filter(
+        queryset = DeviceMeasurement.objects.select_related('device', 'plant')
+        if self.request.user.is_staff:
+            return queryset.order_by('-timestamp')
+        return queryset.filter(
             plant__owner=self.request.user
         ).order_by('-timestamp')
 
@@ -353,15 +363,20 @@ class MeasurementDetailView(LoginRequiredMixin, DetailView):
     context_object_name = 'measurement'
 
     def get_queryset(self):
-        return super().get_queryset().select_related(
-            'device', 'plant'
-        ).filter(plant__owner=self.request.user)
+        queryset = super().get_queryset().select_related('device', 'plant')
+        if self.request.user.is_staff:
+            return queryset
+        return queryset.filter(plant__owner=self.request.user)
 
 @login_required
 def device_delete(request, pk):
     if request.method == 'POST':
         try:
-            device = get_object_or_404(DeviceConfiguration, pk=pk, plant__owner=request.user)
+            # Permetti agli admin di eliminare qualsiasi dispositivo
+            if request.user.is_staff:
+                device = get_object_or_404(DeviceConfiguration, pk=pk)
+            else:
+                device = get_object_or_404(DeviceConfiguration, pk=pk, plant__owner=request.user)
             
             # Ottieni i topic MQTT prima dell'eliminazione
             device_topics = device.get_mqtt_topics()
