@@ -173,13 +173,28 @@ def mqtt_control(request):
         
         try:
             if action == 'connect':
-                success = client.connect()
+                # Ottieni il broker attivo
+                mqtt_broker = MQTTBroker.objects.filter(is_active=True).first()
+                if not mqtt_broker:
+                    messages.error(request, 'Nessun broker MQTT attivo configurato')
+                    return redirect('energy:mqtt_settings')
+                    
+                # Configura e avvia
+                client.configure(
+                    host=mqtt_broker.host,
+                    port=mqtt_broker.port,
+                    username=mqtt_broker.username,
+                    password=mqtt_broker.password,
+                    use_tls=mqtt_broker.use_tls
+                )
+                success = client.start()
+                
                 if success:
                     messages.success(request, 'Connessione MQTT avviata')
                 else:
                     messages.error(request, 'Errore connessione MQTT')
             elif action == 'disconnect':
-                client.disconnect()
+                client.stop()
                 messages.success(request, 'Connessione MQTT terminata')
             else:
                 messages.warning(request, 'Azione non valida')

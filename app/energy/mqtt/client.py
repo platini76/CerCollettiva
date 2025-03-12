@@ -38,6 +38,7 @@ class EnergyMQTTClient:
         self._message_count = 0
         self._retry_delay = 1
         self._max_retry_delay = 60
+        self._sock = None  # Aggiungiamo questo attributo per evitare errori _sock
         
         # Flag di controllo thread
         self._running = False
@@ -66,6 +67,13 @@ class EnergyMQTTClient:
             daemon=True
         )
         self._start_heartbeat()
+        
+    # Convenience method for backwards compatibility
+    def connect(self, host=None, port=None, username=None, password=None, use_tls=False):
+        """Compatibility method to configure and start in one call"""
+        if host and port:
+            self.configure(host, port, username, password, use_tls)
+        return self.start()
 
     def configure(self, host: str, port: int, username: str = None, 
                 password: str = None, use_tls: bool = False):
@@ -102,8 +110,12 @@ class EnergyMQTTClient:
             self._client = mqtt.Client(client_id=client_id, clean_session=False)
             
             # Imposta timeout più breve per la connessione
-            self._client.connect_timeout = 5.0  # 5 secondi
+            self._client.connect_timeout = 30.0  # Aumentato a 30 secondi
             self._client.reconnect_delay_set(min_delay=1, max_delay=60)
+            
+            # Imposta debugging
+            logger.info(f"Configurazione client MQTT - Host: {self._host}, Port: {self._port}")
+            logger.info(f"Username: {self._username}, Password: {'*****' if self._password else 'None'}")
             
             # Callbacks 
             self._client.on_connect = self._on_connect
@@ -112,11 +124,15 @@ class EnergyMQTTClient:
             
             # Auth
             if self._username:
+                logger.info(f"Impostazione credenziali MQTT: {self._username}")
                 self._client.username_pw_set(self._username, self._password)
                 
             # TLS
             if self._use_tls:
+                logger.info("Attivazione TLS")
                 self._client.tls_set()
+            else:
+                logger.info("TLS disattivato")
             
             # LWT
             self._client.will_set(
@@ -182,28 +198,41 @@ class EnergyMQTTClient:
                 raise ValueError("Client not configured. Call configure() first.")
                     
             logger.info(f"Connessione al broker MQTT {self._host}:{self._port}")
+            logger.info(f"Credenziali: Username={self._username}, Password={'*****' if self._password else 'None'}")
             
             try:
-                #logger.info("prima di connect")            
-                self._client.connect(
-                    self._host,
-                    self._port,
-                    keepalive=60
-                )
-                #logger.info("dopo connect")
+                logger.info("Tentativo di connessione in corso...")            
+                try:
+                    result = self._client.connect(
+                        self._host,
+                        self._port,
+                        keepalive=60
+                    )
+                    logger.info(f"Connect result code: {result}")
+                except Exception as connect_err:
+                    logger.error(f"Errore specifico in connect(): {str(connect_err)}", exc_info=True)
+                    raise
+                
+                logger.info("Connessione riuscita, avvio loop...")
                 
                 self._client.loop_start()
-                #logger.info("dopo loop_start")
+                logger.info("Loop avviato")
                 
                 # Invece di usare is_connected, usa un metodo di check interno
-                connection_timeout = 10  # 10 secondi
+                connection_timeout = 20  # Aumentato a 20 secondi
                 start_time = time.time()
                 
+                logger.info("Verifica stato connessione...")
+                attempt = 0
                 while not self._check_connection_status():  # Nuovo metodo
+                    attempt += 1
+                    logger.info(f"Tentativo {attempt}: attesa connessione...")
                     if time.time() - start_time > connection_timeout:
+                        logger.error(f"Timeout dopo {connection_timeout} secondi")
                         raise TimeoutError("Connection timeout")
-                    time.sleep(0.1)
-                    
+                    time.sleep(0.5)
+                
+                logger.info("Connessione verificata con successo!")
                 return True
 
             except TimeoutError:
@@ -212,28 +241,39 @@ class EnergyMQTTClient:
                 return False
                     
             except Exception as e:
-                logger.error(f"MQTT client start error: {str(e)}")
+                logger.error(f"MQTT client start error: {str(e)}", exc_info=True)
                 self._reconnect_with_backoff()
                 return False
 
         except Exception as e:
-            logger.error(f"Error starting MQTT client: {str(e)}")
+            logger.error(f"Error starting MQTT client: {str(e)}", exc_info=True)
             return False
 
     # Aggiungi questo nuovo metodo interno
     def _check_connection_status(self) -> bool:
         """Metodo interno per verificare lo stato della connessione"""
         with self._lock:
-            return (self._client is not None and 
-                    self._client.is_connected() and 
-                    self._is_connected)
+            if self._client is None:
+                return False
+            try:
+                return (hasattr(self._client, 'is_connected') and 
+                        self._client.is_connected() and 
+                        self._is_connected)
+            except Exception as e:
+                logger.error(f"Errore verifica connessione: {e}")
+                return False
 
 
     def check_connection(self) -> bool:
         """Verifica lo stato di connessione effettivo"""
-        return (self._client is not None and 
-                self._client.is_connected() and 
-                self._is_connected)
+        if self._client is None:
+            return False
+        try:
+            return (hasattr(self._client, 'is_connected') and 
+                    self._client.is_connected() and 
+                    self._is_connected)
+        except Exception as e:
+            return False
 
     def stop(self) -> None:
         """Ferma il client MQTT"""
@@ -258,15 +298,19 @@ class EnergyMQTTClient:
                 self._is_connected = True
                 #print("\n=============== MQTT ==================")
                 print(f" | Connessione al broker stabilita!    |")
+                logger.info(f"ON_CONNECT: Connessione stabilita con successo!")
                 logger.info(f"Broker: {self._host}:{self._port}")
                 logger.info(f"Client ID: {client._client_id.decode()}")
+                logger.info(f"Flags: {flags}")
                 
                 if self._subscribed_topics:
                     print(" | Topic sottoscritti:                |")
                     for topic in self._subscribed_topics:
                         print(f" | - {topic}")
+                    logger.info(f"Topic sottoscritti: {self._subscribed_topics}")
                 else:
                     print(" | Nessun topic sottoscritto         |")
+                    logger.info("Nessun topic sottoscritto")
                 
                 self._subscribe_topics()
                 self._publish_status("online")
@@ -284,7 +328,8 @@ class EnergyMQTTClient:
             print(f" | Connessione MQTT fallita!            |")
             print(f" | Motivo: {error_msg}")
             print("========================================\n")
-            logger.error(f"MQTT connection failed: {error_msg}")
+            logger.error(f"MQTT connection failed: {error_msg} (code {rc})")
+            logger.error(f"Host: {self._host}, Port: {self._port}, Username: {self._username}")
             with self._lock:
                 self._is_connected = False
         
@@ -487,9 +532,15 @@ class EnergyMQTTClient:
     def is_connected(self):
         """Verifica lo stato di connessione effettivo"""
         with self._lock:
-            return (self._client is not None and 
-                    self._client.is_connected() and 
-                    self._is_connected)
+            # Verifica più sicura per evitare errori
+            if self._client is None:
+                return False
+            try:
+                return (hasattr(self._client, 'is_connected') and 
+                        self._client.is_connected() and 
+                        self._is_connected)
+            except Exception as e:
+                return False
 
     def refresh_configurations(self) -> None:
         """Aggiorna le configurazioni e rinnova le sottoscrizioni"""
@@ -615,7 +666,26 @@ def init_mqtt_connection():
                 print(f" | Broker trovato: {mqtt_broker.host}   |")
                 print(f" | Porta: {mqtt_broker.port}            |")
                 
+                # Test di connessione diretto con paho-mqtt
+                try:
+                    import paho.mqtt.client as mqtt_test
+                    test_client = mqtt_test.Client("test_connection")
+                    logger.info(f"Test di connessione MQTT con {mqtt_broker.host}:{mqtt_broker.port}")
+                    if mqtt_broker.username:
+                        test_client.username_pw_set(mqtt_broker.username, mqtt_broker.password)
+                        logger.info(f"Impostate credenziali: {mqtt_broker.username}")
+                    
+                    logger.info("Tentativo di connessione test...")
+                    result = test_client.connect(mqtt_broker.host, mqtt_broker.port, 5)
+                    logger.info(f"Test connessione risultato: {result}")
+                    test_client.disconnect()
+                    logger.info("Test di connessione riuscito!")
+                except Exception as test_error:
+                    logger.error(f"Test di connessione fallito: {str(test_error)}")
+                
                 # Configura e avvia il client
+                logger.info(f"Configurazione client principale con {mqtt_broker.host}:{mqtt_broker.port}")
+                logger.info(f"Username: {mqtt_broker.username}, Password: {'****' if mqtt_broker.password else 'None'}")
                 client.configure(
                     host=mqtt_broker.host,
                     port=mqtt_broker.port,
@@ -625,17 +695,21 @@ def init_mqtt_connection():
                 )
                 
                 print(" | Avvio connessione...            |")
-                client.start()
+                success = client.start()
+                logger.info(f"Risultato avvio client: {'Successo' if success else 'Fallito'}")
                 
                 # Verifica connessione
                 time.sleep(2)
                 if client.is_connected:
                     print(" | ✓ Connessione stabilita!         |")
+                    logger.info("Connessione stabilita con successo!")
                 else:
                     print(" | ✗ Connessione fallita!           |")
+                    logger.error("Connessione MQTT fallita dopo l'avvio")
                 #print("===================================\n")
             else:
                 print(" | ✗ Nessun broker MQTT attivo      |")
+                logger.warning("Nessun broker MQTT attivo trovato nel database")
                 #print("===================================\n")
                 
         except Exception as db_error:
