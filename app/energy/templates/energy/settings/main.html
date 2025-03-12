@@ -173,9 +173,35 @@ document.getElementById('use_tls').addEventListener('change', function() {
    document.getElementById('cert_section').style.display = this.checked ? 'block' : 'none';
 });
 
-// Auto-refresh della pagina ogni 30 secondi
-setTimeout(function() {
-   location.reload();
-}, 30000);
+// Aggiornamento via AJAX invece di auto-refresh
+function updateMqttStatus() {
+    fetch('{% url "energy:mqtt_settings" %}?ajax=1')
+        .then(response => response.json())
+        .then(data => {
+            // Aggiorna badge di connessione
+            const statusBadge = document.querySelector('.badge');
+            if (data.is_connected) {
+                statusBadge.classList.remove('bg-danger');
+                statusBadge.classList.add('bg-success');
+                statusBadge.textContent = 'Connesso';
+            } else {
+                statusBadge.classList.remove('bg-success');
+                statusBadge.classList.add('bg-danger');
+                statusBadge.textContent = 'Disconnesso';
+            }
+            
+            // Aggiorna statistiche
+            document.querySelector('.text-success').textContent = data.stats.total_connections;
+            document.querySelector('.text-danger').textContent = data.stats.failed_connections;
+            document.querySelector('.text-info').textContent = data.stats.total_messages;
+            
+            // Aggiorna log se necessario
+            // ...
+        })
+        .catch(error => console.error('Errore aggiornamento stato:', error));
+}
+
+// Aggiorna lo stato ogni 30 secondi senza ricaricare la pagina
+setInterval(updateMqttStatus, 30000);
 </script>
 {% endblock %}

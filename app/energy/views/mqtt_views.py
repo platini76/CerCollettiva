@@ -17,6 +17,9 @@ def mqtt_settings(request):
     if not request.user.is_staff:
         messages.error(request, 'Accesso non autorizzato')
         return redirect('energy:dashboard')
+    
+    # Verifica se è una richiesta AJAX per aggiornamento stato
+    is_ajax = request.GET.get('ajax') == '1'
         
     if request.method == 'POST':
         try:
@@ -102,14 +105,26 @@ def mqtt_settings(request):
     mqtt_status = "Connesso" if client.is_connected else "Disconnesso"
     logger.info(f"Stato connessione MQTT: {mqtt_status}")
 
+    # Prepara dati per risposta
+    stats = {
+        'total_connections': MQTTAuditLog.objects.filter(operation='CONNECT', status=True).count(),
+        'failed_connections': MQTTAuditLog.objects.filter(operation='CONNECT', status=False).count(),
+        'total_messages': MQTTAuditLog.objects.filter(operation='MESSAGE').count()
+    }
+    
+    # Se è una richiesta AJAX, restituisce solo i dati aggiornati
+    if is_ajax:
+        from django.http import JsonResponse
+        return JsonResponse({
+            'is_connected': client.is_connected,
+            'mqtt_status': mqtt_status,
+            'stats': stats
+        })
+
     context = {
         'mqtt_config': MQTTBroker.objects.filter(is_active=True).first(),
         'system_logs': recent_logs,
-        'stats': {
-            'total_connections': MQTTAuditLog.objects.filter(operation='CONNECT', status=True).count(),
-            'failed_connections': MQTTAuditLog.objects.filter(operation='CONNECT', status=False).count(),
-            'total_messages': MQTTAuditLog.objects.filter(operation='MESSAGE').count()
-        },
+        'stats': stats,
         'is_connected': client.is_connected,
         'mqtt_status': mqtt_status
     }
