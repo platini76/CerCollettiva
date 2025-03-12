@@ -10,7 +10,7 @@ from ..models import MQTTBroker, MQTTAuditLog
 from .core import get_mqtt_service, MQTTMessage
 import time
 import json
-from queue import Queue
+from queue import Queue, Empty as QueueEmpty
 from collections import deque
 
 
@@ -39,6 +39,12 @@ class EnergyMQTTClient:
         self._retry_delay = 1
         self._max_retry_delay = 60
         
+        # Flag di controllo thread
+        self._running = False
+        self._heartbeat_running = False
+        self._monitor_running = False
+        self._reconnect_running = False
+        
         # Thread safety
         self._lock = threading.Lock()
         self._subscription_lock = threading.Lock()
@@ -49,9 +55,16 @@ class EnergyMQTTClient:
         self._message_buffer = deque(maxlen=1000)
         self._device_manager = DeviceManager()
         
+        # Importa thread manager
+        from .thread_manager import thread_manager
+        self._thread_manager = thread_manager
+        
         # Start worker threads
-        self._processing_thread = threading.Thread(target=self._process_queue, daemon=True)
-        self._processing_thread.start()
+        self._thread_manager.start_thread(
+            name="mqtt_message_processor", 
+            target=self._process_queue, 
+            daemon=True
+        )
         self._start_heartbeat()
 
     def configure(self, host: str, port: int, username: str = None, 
@@ -119,16 +132,24 @@ class EnergyMQTTClient:
 
     def _process_queue(self):
         """Thread dedicato al processing dei messaggi"""
-        while True:
+        self._running = True
+        while self._running:
             try:
-                msg = self._message_queue.get()
-                # Aggiungi al buffer circolare
-                self._message_buffer.append(msg)
-                # Processa il messaggio
-                self._process_message(msg)
-                self._message_queue.task_done()
+                # Usa timeout per poter controllare flag _running
+                try:
+                    msg = self._message_queue.get(timeout=1.0)
+                    # Aggiungi al buffer circolare
+                    self._message_buffer.append(msg)
+                    # Processa il messaggio
+                    self._process_message(msg)
+                    self._message_queue.task_done()
+                except QueueEmpty:
+                    # Normale timeout, continua
+                    continue
+                except Exception as e:
+                    logger.error(f"Error getting message from queue: {e}", exc_info=True)
             except Exception as e:
-                logger.error(f"Error processing message from queue: {e}")
+                logger.error(f"Error processing message from queue: {e}", exc_info=True)
 
     def _process_message(self, msg):
         """Processa un singolo messaggio"""
@@ -276,10 +297,16 @@ class EnergyMQTTClient:
 
     def _reconnect_with_backoff(self):
         def reconnect_thread():
-            while not self.check_connection():  # usa il nuovo metodo rinominato
+            # Flag che controlla l'esecuzione del ciclo
+            self._reconnect_running = True
+            while self._reconnect_running and not self.check_connection():
                 try:
                     logger.info(f"Tentativo di riconnessione tra {self._retry_delay}s...")
                     time.sleep(self._retry_delay)
+                    
+                    if not self._reconnect_running:
+                        logger.info("Riconnessione interrotta")
+                        break
                     
                     if self._client.reconnect() == 0:  # verifica il risultato della riconnessione
                         logger.info("Riconnessione riuscita")
@@ -291,7 +318,12 @@ class EnergyMQTTClient:
                     logger.error(f"Tentativo di riconnessione fallito: {e}")
                     self._retry_delay = min(self._retry_delay * 2, self._max_retry_delay)
 
-        threading.Thread(target=reconnect_thread, daemon=True).start()
+        # Usa thread manager per tracciare i thread
+        self._thread_manager.start_thread(
+            name="mqtt_reconnect",
+            target=reconnect_thread,
+            daemon=True
+        )
                 
     def _on_message(self, client, userdata, msg):
         """Callback per i messaggi ricevuti"""
@@ -499,8 +531,12 @@ class EnergyMQTTClient:
             self._last_values.update(current_values)
 
     def _start_heartbeat(self):
+        """Avvia un thread di heartbeat in background usando ThreadManager"""
+        from .thread_manager import thread_manager
+        
         def heartbeat():
-            while self._is_connected:
+            self._heartbeat_running = True
+            while self._heartbeat_running and self._is_connected:
                 logger.info(f"""
                     === MQTT Client Heartbeat ===
                     Stato: {'Connesso' if self._is_connected else 'Disconnesso'}
@@ -509,23 +545,47 @@ class EnergyMQTTClient:
                     Topics sottoscritti: {len(self._subscribed_topics)}
                     Host: {self._host}:{self._port}
                 """)
-                time.sleep(60)
-        threading.Thread(target=heartbeat, daemon=True).start()
+                
+                # Sleep con check periodico per terminazione
+                for _ in range(60):  # 60 secondi
+                    if not self._heartbeat_running or not self._is_connected:
+                        break
+                    time.sleep(1)
+                    
+        # Utilizza il thread manager per creare e tracciare il thread
+        thread_manager.start_thread(
+            name="mqtt_heartbeat", 
+            target=heartbeat, 
+            daemon=True
+        )
         
     def _start_connection_monitor(self):
-        """Monitora lo stato della connessione"""
+        """Monitora lo stato della connessione usando ThreadManager"""
+        from .thread_manager import thread_manager
+        
         def monitor():
-            while True:
+            self._monitor_running = True
+            while self._monitor_running:
                 try:
                     with self._lock:
                         if self._client and self._client.is_connected() != self._is_connected:
                             logger.warning(f"Stato connessione discrepante: client={self._client.is_connected()}, internal={self._is_connected}")
-                    time.sleep(5)
+                    
+                    # Sleep con check periodico per terminazione
+                    for _ in range(5):  # 5 secondi
+                        if not self._monitor_running:
+                            break
+                        time.sleep(1)
                 except Exception as e:
                     logger.error(f"Error in connection monitor: {e}")
                     time.sleep(5)
-                    
-        threading.Thread(target=monitor, daemon=True).start()
+        
+        # Utilizza il thread manager per creare e tracciare il thread
+        thread_manager.start_thread(
+            name="mqtt_connection_monitor", 
+            target=monitor, 
+            daemon=True
+        )
 
 def init_mqtt_connection():
     """

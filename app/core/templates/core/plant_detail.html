@@ -408,7 +408,8 @@ class PowerChartManager {
             const config = this.rangeConfigs[this.selectedRange];
             const hours = config.minutes / 60;
             
-            const historyResponse = await fetch(`/api/plants/${this.plantId}/data/?hours=${hours}`);
+            // Fix: Usa un percorso relativo piuttosto che assoluto
+            const historyResponse = await fetch(`../../api/plants/${this.plantId}/data/?hours=${hours}`);
             if (!historyResponse.ok) throw new Error(`HTTP error! status: ${historyResponse.status}`);
             const historyData = await historyResponse.json();
 
@@ -501,8 +502,8 @@ class PowerChartManager {
 
     async updateHourlyEnergy() {
         try {
-            // Ottieni i dati delle ultime 24 ore
-            const response = await fetch(`/api/plants/${this.plantId}/data/?hours=24`);
+            // Fix: Usa un percorso relativo piuttosto che assoluto
+            const response = await fetch(`../../api/plants/${this.plantId}/data/?hours=24`);
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const data = await response.json();
 

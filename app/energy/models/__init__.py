@@ -1,18 +1,13 @@
 # energy/models/__init__.py
-from .device import (
-    Device,
-    DeviceType,
-    DeviceConfiguration,
-    DeviceMeasurement,
-    DeviceMeasurementDetail
-)
-from .energy import (
-    EnergyMeasurement,
-    EnergyAggregate,
-    EnergyInterval  # Aggiunto il nuovo modello
-)
+# Importazioni base
+from .device import DeviceType, DeviceConfiguration, DeviceMeasurement, DeviceMeasurementDetail
+from .energy import EnergyMeasurement, EnergyAggregate, EnergyInterval
 from .mqtt import MQTTBroker, MQTTConfiguration
 from .audit import MQTTAuditLog
+
+# Soluzione più semplice e compatibile per la retrocompatibilità con Device
+# Fornisce un alias per DeviceConfiguration
+Device = DeviceConfiguration
 
 __all__ = [
     'Device',
@@ -22,7 +17,7 @@ __all__ = [
     'DeviceMeasurementDetail',
     'EnergyMeasurement',
     'EnergyAggregate',
-    'EnergyInterval',  # Aggiunto il nuovo modello
+    'EnergyInterval',
     'MQTTBroker',
     'MQTTConfiguration',
     'MQTTAuditLog',

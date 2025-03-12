@@ -1,18 +1,16 @@
 # energy/models/device.py
-from django.db import models
+import logging
+import time
+from django.core.cache import cache
 from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
-from django.utils import timezone
-from .base import BaseTimestampModel, BaseMeasurementModel
-#from core.models import Plant
+from django.core.exceptions import ValidationError
+from django.db import models
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
-from django.core.cache import cache
-import time 
-
-import logging
-
-from django.core.exceptions import ValidationError
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+from .base import BaseTimestampModel, BaseMeasurementModel
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +127,7 @@ class DeviceConfiguration(BaseTimestampModel):
         ('SHELLY_PLUS_PM', 'Shelly Plus PM'),
         ('CUSTOM', 'Custom'),
     ]
-
+    
     DEVICE_TYPE_MAPPING = {
         'SHELLY_PRO_3EM': {'vendor': VENDOR_SHELLY, 'model': 'pro_3em'},
         'SHELLY_PRO_EM': {'vendor': VENDOR_SHELLY, 'model': 'pro_em'},
@@ -139,7 +137,7 @@ class DeviceConfiguration(BaseTimestampModel):
         'CUSTOM': {'vendor': VENDOR_CUSTOM, 'model': 'custom'},
     }
     
-    # Campi base
+    # Campi base (versione originale)
     device_id = models.CharField(max_length=100, unique=True)
     device_type = models.CharField(
         max_length=50, 
@@ -165,12 +163,54 @@ class DeviceConfiguration(BaseTimestampModel):
         null=True, 
         blank=True
     )
-    
-    # Configurazione e stato
     mqtt_topic_template = models.CharField(max_length=255, blank=True, null=True)
     firmware_version = models.CharField(max_length=50, blank=True, null=True)
     last_seen = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    
+    # Nuovi campi estesi (opzionali per non rompere le migrazioni esistenti)
+    name = models.CharField("Nome", max_length=100, blank=True, null=True)
+    serial_number = models.CharField(
+        "Numero Seriale",
+        max_length=100,
+        validators=[
+            RegexValidator(
+                regex=r'^[A-Za-z0-9_-]+$',
+                message='Il numero seriale può contenere solo lettere, numeri, underscore e trattini'
+            )
+        ],
+        blank=True,
+        null=True
+    )
+    description = models.TextField("Descrizione", blank=True)
+    installation_date = models.DateField("Data Installazione", null=True, blank=True)
+    
+    # Dati energetici
+    last_energy_total = models.FloatField(
+        help_text="Ultimo valore di energia totale ricevuto", 
+        null=True, 
+        blank=True
+    )
+    
+    # Configurazione MQTT
+    mqtt_topic_template = models.CharField(max_length=255, blank=True, null=True)
+    mqtt_topic_override = models.CharField(
+        "Override Topic MQTT",
+        max_length=255,
+        blank=True,
+        help_text="Lasciare vuoto per usare il template"
+    )
+    
+    # Stato
+    firmware_version = models.CharField(max_length=50, blank=True, null=True)
+    last_seen = models.DateTimeField(null=True, blank=True)
+    
+    # Configurazione aggiuntiva
+    config = models.JSONField(
+        "Configurazione",
+        default=dict,
+        help_text="Configurazione specifica del dispositivo in formato JSON"
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -179,9 +219,12 @@ class DeviceConfiguration(BaseTimestampModel):
         indexes = [
             models.Index(fields=['device_type', 'vendor']),
             models.Index(fields=['last_seen', 'is_active']),
+            models.Index(fields=['plant', 'device_type']),
         ]
 
     def __str__(self):
+        if self.name:
+            return f"{self.name} - {self.device_id} ({self.get_device_type_display()})"
         return f"{self.device_id} ({self.get_device_type_display()})"
 
     def save(self, *args, **kwargs):
@@ -245,47 +288,65 @@ class DeviceConfiguration(BaseTimestampModel):
         ).select_related('plant')
     
     def get_mqtt_topics(self):
-            """Restituisce la lista dei topic MQTT per questo dispositivo"""
-            topics = []
+        """Restituisce la lista dei topic MQTT per questo dispositivo"""
+        topics = []
+        
+        try:
+            # Se è specificato un template MQTT personalizzato
+            if self.mqtt_topic_template:
+                base_topic = self.mqtt_topic_template.rstrip('/')
+                topics.extend([f"{base_topic}/status/#"])
+                
+                # Aggiungi topic specifici per Shelly
+                if self.vendor == self.VENDOR_SHELLY:
+                    topics.extend([
+                        f"{base_topic}/status/em:0",
+                        f"{base_topic}/status/emdata:0"
+                    ])
+                    logger.debug(f"MQTT topics generated by template for device: {self.device_id}")
             
-            try:
-                # Se è specificato un template MQTT personalizzato
-                if self.mqtt_topic_template:
-                    base_topic = self.mqtt_topic_template.rstrip('/')
-                    topics.extend([f"{base_topic}/status/#"])
-                    
-                    # Aggiungi topic specifici per Shelly
-                    if self.vendor == self.VENDOR_SHELLY:
-                        topics.extend([
-                            f"{base_topic}/status/em:0",
-                            f"{base_topic}/status/emdata:0"
-                        ])
-                        logger.info(f"MQTT topics generated by template for device: {self.device_id} - {topics}")
+            # Se non c'è un template, genera i topic in base al vendor e POD
+            elif self.plant and hasattr(self.plant, 'pod_code'):
+                vendor_prefix = self.vendor.replace('_', '')
+                base_topic = f"{vendor_prefix}/{self.plant.pod_code}/{self.device_id}"
                 
-                # Se non c'è un template, genera i topic in base al vendor e POD
-                elif self.plant and hasattr(self.plant, 'pod_code'):
-                    vendor_prefix = self.vendor.replace('_', '')
-                    base_topic = f"{vendor_prefix}/{self.plant.pod_code}/{self.device_id}"
-                    
-                    if self.vendor == self.VENDOR_SHELLY:
-                        topics.extend([
-                            f"{base_topic}/status/em:0",
-                            f"{base_topic}/status/emdata:0"
-                        ])
-                    else:
-                        topics.extend([
-                            f"{base_topic}/status/#",
-                            f"{base_topic}/power/#",
-                            f"{base_topic}/energy/#"
-                        ])
-                    logger.info(f"MQTT topics generated by vendor and pod_code for device: {self.device_id} - {topics}")
-                
-                logger.info(f"Generated MQTT topics for device {self.device_id}: {topics}")
-                return topics
-                
-            except Exception as e:
-                logger.error(f"Error generating MQTT topics for device {self.device_id}: {str(e)}")
-                return ["cercollettiva/+/+/value"]  # Fallback a topic wildcard
+                if self.vendor == self.VENDOR_SHELLY:
+                    topics.extend([
+                        f"{base_topic}/status/em:0",
+                        f"{base_topic}/status/emdata:0"
+                    ])
+                else:
+                    topics.extend([
+                        f"{base_topic}/status/#",
+                        f"{base_topic}/power/#",
+                        f"{base_topic}/energy/#"
+                    ])
+                logger.debug(f"MQTT topics generated by vendor and pod_code for device: {self.device_id}")
+            
+            return topics
+            
+        except Exception as e:
+            logger.error(f"Error generating MQTT topics for device {self.device_id}: {str(e)}")
+            return ["cercollettiva/+/+/value"]  # Fallback a topic wildcard
+
+    def get_mqtt_topic(self):
+        """Restituisce il topic MQTT effettivo per il dispositivo"""
+        if self.mqtt_topic_override:
+            return self.mqtt_topic_override
+        
+        if self.mqtt_topic_template:
+            return self.mqtt_topic_template
+        
+        # Genera topic basato su vendor e POD
+        if self.plant and hasattr(self.plant, 'pod_code'):
+            vendor_prefix = self.vendor.replace('_', '')
+            return f"{vendor_prefix}/{self.plant.pod_code}/{self.device_id}"
+        
+        return f"cercollettiva/device/{self.device_id}"
+
+# Una versione precedente di Device era qui, 
+# ma ora DeviceConfiguration è l'unico modello usato.
+# L'alias è definito in __init__.py
     
 
 class DeviceMeasurement(BaseMeasurementModel):

@@ -3,8 +3,7 @@ from django_filters import rest_framework as filters
 from django.db.models import Q
 from functools import lru_cache
 from django.apps import apps
-from ..models.device import DeviceConfiguration, DeviceMeasurement
-from ..models.energy import EnergyMeasurement, EnergyAggregate
+from ..models import DeviceConfiguration, DeviceMeasurement, EnergyMeasurement, EnergyAggregate
 from core.models import Plant
 
 def create_filters():
