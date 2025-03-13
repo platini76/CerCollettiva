@@ -42,13 +42,21 @@ def total_power_data(request):
             time_threshold = now - timedelta(minutes=5)
             aggregation_minutes = 1
 
+        # Registra i parametri della query
+        logger.info(f"Recupero dati potenza - Range: {time_range}, Soglia: {time_threshold}, Aggregazione: {aggregation_minutes} min")
+        
         # Query base per le misurazioni
         measurements = DeviceMeasurement.objects.filter(
             timestamp__gte=time_threshold
         ).select_related('device', 'device__plant').order_by('timestamp')
 
+        # Filtra per utente se non è staff
         if not request.user.is_staff:
             measurements = measurements.filter(plant__owner=request.user)
+            
+        # Log per debug
+        count = measurements.count()
+        logger.info(f"Trovate {count} misurazioni per il periodo selezionato")
 
         # Aggregazione dei dati
         data_points = {}
@@ -105,18 +113,23 @@ def total_power_data(request):
 class DashboardView(LoginRequiredMixin, TemplateView):
     template_name = 'energy/dashboard.html'
 
-    def dispatch(self, request, *args, **kwargs):
-        if not request.user.is_staff:
-            messages.error(request, 'Accesso consentito solo agli amministratori')
-            return redirect('core:home')
-        return super().dispatch(request, *args, **kwargs)
+    # Rimuoviamo il controllo che obbliga l'utente ad essere admin
+    # def dispatch(self, request, *args, **kwargs):
+    #     if not request.user.is_staff:
+    #         messages.error(request, 'Accesso consentito solo agli amministratori')
+    #         return redirect('core:home')
+    #     return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         now = timezone.now()
         time_threshold = now - timedelta(minutes=5)
 
-        plants = Plant.objects.filter(owner=self.request.user)  # Retrieve plants for the current user
+        # Admin può vedere tutti gli impianti, utenti normali solo i propri
+        if self.request.user.is_staff:
+            plants = Plant.objects.all()  # L'admin vede tutti gli impianti
+        else:
+            plants = Plant.objects.filter(owner=self.request.user)  # Utenti normali vedono solo i propri
 
         logger.info("\n=== PLANT STATUS CHECK START ===")
         
@@ -172,30 +185,46 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             client = get_mqtt_client()
             mqtt_status = "Connesso" if client and client.is_connected else "Disconnesso"
             
+            # Calcola i dispositivi nuovi in base al ruolo dell'utente
+            if self.request.user.is_staff:
+                new_devices_query = DeviceConfiguration.objects.filter(
+                    created_at__gte=now - timedelta(days=1)
+                )
+            else:
+                new_devices_query = DeviceConfiguration.objects.filter(
+                    plant__owner=self.request.user,
+                    created_at__gte=now - timedelta(days=1)
+                )
+                
             device_stats = {
                 'total_devices': len(all_plant_devices),
                 'active_devices': total_active,
                 'online_devices': online_count,
                 'online_percentage': int((online_count / total_active * 100) if total_active > 0 else 0),
-                'new_devices':  DeviceConfiguration.objects.filter(plant__owner=self.request.user,
-                    created_at__gte=now - timedelta(days=1)
-                ).count()
+                'new_devices': new_devices_query.count()
             }
 
             # Query ottimizzata per i tipi di dispositivo
-            device_types = (DeviceConfiguration.objects
-                        .filter(plant__owner=self.request.user)
-                        .values('vendor', 'model')
-                        .annotate(count=Count('id'))
-                        .filter(count__gt=0)
-                        .order_by('vendor', 'model'))
+            if self.request.user.is_staff:
+                device_types = (DeviceConfiguration.objects
+                            .values('vendor', 'model')
+                            .annotate(count=Count('id'))
+                            .filter(count__gt=0)
+                            .order_by('vendor', 'model'))
+            else:
+                device_types = (DeviceConfiguration.objects
+                            .filter(plant__owner=self.request.user)
+                            .values('vendor', 'model')
+                            .annotate(count=Count('id'))
+                            .filter(count__gt=0)
+                            .order_by('vendor', 'model'))
 
             context.update({
                 **device_stats,
                 'device_types': device_types,
                 'system_alerts': [],
                 'mqtt_stats': {
-                    'messages': DeviceMeasurement.objects.filter(
+                    'messages': DeviceMeasurement.objects.all().count() if self.request.user.is_staff else DeviceMeasurement.objects.filter(
                         device__plant__owner=self.request.user
                     ).count(),
                     'errors': 0,
