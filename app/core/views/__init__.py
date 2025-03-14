@@ -1,6 +1,6 @@
 # core/views/__init__.py
 from .dashboard import DashboardView, HomeView, CerDashboardView
-from .cer import CERListView, CERDetailView, CERJoinView
+from .cer import CERListView, CERDetailView, CERJoinView, CERDistributionSettingsView, CERCreateView
 from .plant import (
     PlantListView,
     PlantDetailView,
@@ -24,6 +24,8 @@ __all__ = [
     'CERListView',
     'CERDetailView',
     'CERJoinView',
+    'CERCreateView',
+    'CERDistributionSettingsView',
     'PlantListView',
     'PlantDetailView',
     'PlantCreateView',

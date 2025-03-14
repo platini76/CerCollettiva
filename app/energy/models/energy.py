@@ -2,6 +2,8 @@
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.utils import timezone
+from django.conf import settings
+from decimal import Decimal
 from .base import BaseMeasurementModel
 from .device import DeviceMeasurement, DeviceConfiguration
 
@@ -189,3 +191,197 @@ class EnergyAggregate(BaseMeasurementModel):
     def is_complete(self) -> bool:
         """Verifica se l'aggregazione è completa"""
         return self.end_time <= timezone.now()
+
+# Modelli per la gestione del Settlement CER
+class CERSettlement(models.Model):
+    """
+    Settlement economico delle CER
+    Tiene traccia dei benefici economici della CER nel suo insieme
+    """
+    cer = models.ForeignKey(
+        'core.CERConfiguration', 
+        on_delete=models.CASCADE, 
+        related_name='settlements',
+        verbose_name="Comunità Energetica"
+    )
+    
+    # Periodo di settlement
+    period_start = models.DateTimeField(
+        verbose_name="Inizio Periodo",
+        help_text="Inizio del periodo di settlement"
+    )
+    period_end = models.DateTimeField(
+        verbose_name="Fine Periodo",
+        help_text="Fine del periodo di settlement"
+    )
+    
+    # Dati energetici e incentivi
+    total_shared_energy = models.DecimalField(
+        max_digits=15, 
+        decimal_places=3, 
+        default=0,
+        verbose_name="Energia Condivisa",
+        help_text="kWh condivisi totali nella CER"
+    )
+    total_incentive = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0,
+        verbose_name="Incentivo Totale",
+        help_text="Incentivo totale in €"
+    )
+    unit_incentive = models.DecimalField(
+        max_digits=8, 
+        decimal_places=5, 
+        default=0,
+        verbose_name="Incentivo Unitario",
+        help_text="Incentivo unitario in €/kWh"
+    )
+    
+    # Stato del settlement
+    STATUS_CHOICES = [
+        ('DRAFT', 'Bozza'),
+        ('FINALIZED', 'Finalizzato'),
+        ('APPROVED', 'Approvato'),
+        ('DISTRIBUTED', 'Distribuito'),
+    ]
+    status = models.CharField(
+        max_length=20, 
+        choices=STATUS_CHOICES, 
+        default='DRAFT',
+        verbose_name="Stato",
+        help_text="Stato attuale del settlement"
+    )
+    
+    # Chi ha creato/approvato il settlement
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        related_name='created_settlements',
+        verbose_name="Creato Da"
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='approved_settlements',
+        verbose_name="Approvato Da"
+    )
+    
+    # Metadati
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Settlement CER"
+        verbose_name_plural = "Settlement CER"
+        ordering = ['-period_start']
+        indexes = [
+            models.Index(fields=['cer', 'period_start', 'period_end']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        return f"CER {self.cer.name} - {self.period_start.strftime('%Y-%m')} - {self.status}"
+    
+    @property
+    def period_name(self):
+        """Nome leggibile del periodo"""
+        if self.period_start.month == self.period_end.month and self.period_start.year == self.period_end.year:
+            return self.period_start.strftime('%B %Y')
+        return f"{self.period_start.strftime('%b %Y')} - {self.period_end.strftime('%b %Y')}"
+        
+    @property
+    def is_editable(self):
+        """Verifica se il settlement è ancora modificabile"""
+        return self.status in ['DRAFT', 'FINALIZED']
+
+class MemberSettlement(models.Model):
+    """
+    Settlement economico dei singoli membri della CER
+    Contiene i dettagli di energia e incentivi per ciascun membro
+    """
+    settlement = models.ForeignKey(
+        CERSettlement, 
+        on_delete=models.CASCADE, 
+        related_name='member_settlements',
+        verbose_name="Settlement"
+    )
+    membership = models.ForeignKey(
+        'core.CERMembership', 
+        on_delete=models.CASCADE, 
+        related_name='settlements',
+        verbose_name="Membro CER"
+    )
+    
+    # Dati energetici
+    produced = models.DecimalField(
+        max_digits=15, 
+        decimal_places=3, 
+        default=0,
+        verbose_name="Energia Prodotta",
+        help_text="kWh prodotti dal membro"
+    )
+    consumed = models.DecimalField(
+        max_digits=15, 
+        decimal_places=3, 
+        default=0,
+        verbose_name="Energia Consumata",
+        help_text="kWh consumati dal membro"
+    )
+    fed_in = models.DecimalField(
+        max_digits=15, 
+        decimal_places=3, 
+        default=0,
+        verbose_name="Energia Immessa",
+        help_text="kWh immessi in rete dal membro"
+    )
+    self_consumed = models.DecimalField(
+        max_digits=15, 
+        decimal_places=3, 
+        default=0,
+        verbose_name="Autoconsumo",
+        help_text="kWh autoconsumati dal membro"
+    )
+    shared = models.DecimalField(
+        max_digits=15, 
+        decimal_places=3, 
+        default=0,
+        verbose_name="Energia Condivisa",
+        help_text="kWh condivisi con la CER"
+    )
+    
+    # Incentivi e benefici economici
+    incentive_amount = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=0,
+        verbose_name="Incentivo",
+        help_text="€ di incentivo"
+    )
+    grid_savings = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=0,
+        verbose_name="Risparmio Rete",
+        help_text="€ risparmiati da oneri di rete"
+    )
+    
+    # Metadati
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Settlement Membro"
+        verbose_name_plural = "Settlement Membri"
+        unique_together = ('settlement', 'membership')
+    
+    def __str__(self):
+        return f"{self.membership.user.username} - {self.settlement.period_name}"
+    
+    @property
+    def total_benefit(self):
+        """Beneficio economico totale"""
+        return self.incentive_amount + self.grid_savings

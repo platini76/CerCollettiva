@@ -34,6 +34,20 @@
                        <dd class="col-sm-8">
                            <span class="badge bg-info">{{ cer.plants.count }}</span>
                        </dd>
+                       
+                       {% if user.is_staff or is_admin %}
+                       <dt class="col-sm-4">Ripartizione</dt>
+                       <dd class="col-sm-8">
+                           <div>Produttori: {{ cer.producer_share }}% | Consumatori: {{ cer.consumer_share }}%</div>
+                           <div>Amministrazione: {{ cer.admin_share }}% | Investimenti: {{ cer.investment_fund_share }}%</div> 
+                           <div>Solidarietà: {{ cer.solidarity_fund_share }}% | Avvocato: {{ cer.legal_fund_share }}%</div>
+                           {% if cer.pk %}
+                           <a href="{% url 'core:cer_distribution_settings' pk=cer.pk %}" class="btn btn-sm btn-outline-primary mt-2">
+                               <i class="fas fa-cog"></i> Configura
+                           </a>
+                           {% endif %}
+                       </dd>
+                       {% endif %}
                    </dl>
                </div>
            </div>
@@ -79,6 +93,7 @@
 
        <!-- Colonna laterale -->
        <div class="col-lg-4">
+           {% if user_membership %}
            <!-- Card Membership -->
            <div class="card data-card mb-4">
                <div class="card-header">
@@ -87,13 +102,13 @@
                <div class="card-body">
                    <dl class="row mb-0">
                        <dt class="col-sm-5">Ruolo</dt>
-                       <dd class="col-sm-7">{{ membership.get_role_display }}</dd>
+                       <dd class="col-sm-7">{{ user_membership.get_role_display }}</dd>
 
                        <dt class="col-sm-5">Data adesione</dt>
-                       <dd class="col-sm-7">{{ membership.joined_at|date }}</dd>
+                       <dd class="col-sm-7">{{ user_membership.joined_at|date }}</dd>
                    </dl>
 
-                   {% if not membership.document_verified %}
+                   {% if not user_membership.document_verified %}
                    <div class="alert alert-warning mt-3">
                        <i class="fas fa-exclamation-triangle me-2"></i>
                        Documenti in attesa di verifica
@@ -101,6 +116,7 @@
                    {% endif %}
                </div>
            </div>
+           {% endif %}
 
            <!-- Card Potenza Condivisa -->
            <div class="card data-card">
@@ -259,9 +275,21 @@ function updateGauge() {
    fetch('/api/cer-power/')
        .then(response => response.json())
        .then(data => {
+           if (!data.data || data.data.length === 0) {
+               console.warn('No power data available');
+               return;
+           }
+           
            const powerData = data.data[0];
-           const maxPower = Math.max(Math.abs(powerData.producer_power), Math.abs(powerData.consumer_power), 20);
-           const netPower = powerData.net_power;
+           if (!powerData) {
+               console.warn('Power data is empty');
+               return;
+           }
+           
+           const producerPower = parseFloat(powerData.producer_power) || 0;
+           const consumerPower = parseFloat(powerData.consumer_power) || 0;
+           const netPower = parseFloat(powerData.net_power) || 0;
+           const maxPower = Math.max(Math.abs(producerPower), Math.abs(consumerPower), 20);
            
            // Aggiorna il colore in base al valore
            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
@@ -282,11 +310,13 @@ function updateGauge() {
            const producerEl = document.getElementById('producerPower');
            const consumerEl = document.getElementById('consumerPower');
            
-           producerEl.textContent = `${powerData.producer_power.toFixed(1)} kW`;
-           consumerEl.textContent = `${Math.abs(powerData.consumer_power).toFixed(1)} kW`;
-           
-           producerEl.className = 'power-value text-success';
-           consumerEl.className = 'power-value text-danger';
+           if (producerEl && consumerEl) {
+               producerEl.textContent = `${producerPower.toFixed(1)} kW`;
+               consumerEl.textContent = `${Math.abs(consumerPower).toFixed(1)} kW`;
+               
+               producerEl.className = 'fs-5 fw-bold text-success';
+               consumerEl.className = 'fs-5 fw-bold text-danger';
+           }
        })
        .catch(error => {
            console.error('Error fetching power data:', error);
@@ -295,8 +325,11 @@ function updateGauge() {
 }
 
 // Avvia gli aggiornamenti
-updateGauge();
-setInterval(updateGauge, 5000);
+// Aggiorna il gauge solo se la CER esiste
+if (document.getElementById('powerGauge')) {
+    updateGauge();
+    setInterval(updateGauge, 5000);
+}
 </script>
 {% endblock %}
 {% endblock %}

@@ -14,7 +14,12 @@ class CERConfigurationForm(forms.ModelForm):
     
     class Meta:
         model = CERConfiguration
-        fields = ['name', 'code', 'primary_substation']
+        fields = [
+            'name', 'code', 'primary_substation', 'is_active',
+            'producer_share', 'consumer_share', 'admin_share', 
+            'investment_fund_share', 'solidarity_fund_share', 'legal_fund_share',
+            'accountant_fund_share', 'incentive_rate', 'grid_savings_rate'
+        ]
         widgets = {
             'name': forms.TextInput(attrs={
                 'class': 'form-control',
@@ -28,12 +33,120 @@ class CERConfigurationForm(forms.ModelForm):
                 'class': 'form-control',
                 'placeholder': 'Nome della cabina primaria'
             }),
+            'is_active': forms.CheckboxInput(attrs={
+                'class': 'form-check-input'
+            }),
+            'producer_share': forms.TextInput(attrs={
+                'class': 'form-control',
+                'type': 'number',
+                'step': 'any',
+                'min': '0',
+                'max': '100',
+                'inputmode': 'decimal'
+            }),
+            'consumer_share': forms.TextInput(attrs={
+                'class': 'form-control',
+                'type': 'number',
+                'step': 'any',
+                'min': '0',
+                'max': '100',
+                'inputmode': 'decimal'
+            }),
+            'admin_share': forms.TextInput(attrs={
+                'class': 'form-control',
+                'type': 'number',
+                'step': 'any',
+                'min': '0',
+                'max': '100',
+                'inputmode': 'decimal'
+            }),
+            'investment_fund_share': forms.TextInput(attrs={
+                'class': 'form-control',
+                'type': 'number',
+                'step': 'any',
+                'min': '0',
+                'max': '100',
+                'inputmode': 'decimal'
+            }),
+            'solidarity_fund_share': forms.TextInput(attrs={
+                'class': 'form-control',
+                'type': 'number',
+                'step': 'any',
+                'min': '0',
+                'max': '100',
+                'inputmode': 'decimal'
+            }),
+            'legal_fund_share': forms.TextInput(attrs={
+                'class': 'form-control',
+                'type': 'number',
+                'step': 'any',
+                'min': '0',
+                'max': '100',
+                'inputmode': 'decimal'
+            }),
+            'accountant_fund_share': forms.TextInput(attrs={
+                'class': 'form-control',
+                'type': 'number',
+                'step': 'any',
+                'min': '0',
+                'max': '100',
+                'inputmode': 'decimal'
+            }),
+            'incentive_rate': forms.TextInput(attrs={
+                'class': 'form-control',
+                'type': 'number',
+                'step': 'any',
+                'min': '0',
+                'inputmode': 'decimal'
+            }),
+            'grid_savings_rate': forms.TextInput(attrs={
+                'class': 'form-control',
+                'type': 'number',
+                'step': 'any',
+                'min': '0',
+                'inputmode': 'decimal'
+            }),
         }
         help_texts = {
             'name': 'Nome identificativo della Comunità Energetica',
             'code': 'Codice univoco assegnato alla CER',
-            'primary_substation': 'Nome della cabina primaria di riferimento'
+            'primary_substation': 'Nome della cabina primaria di riferimento',
+            'is_active': 'Indica se la CER è attiva e visibile agli utenti',
+            'producer_share': 'Percentuale dell\'incentivo da assegnare ai produttori',
+            'consumer_share': 'Percentuale dell\'incentivo da assegnare ai consumatori',
+            'admin_share': 'Percentuale dell\'incentivo per costi amministrativi',
+            'investment_fund_share': 'Percentuale per futuri investimenti della CER',
+            'solidarity_fund_share': 'Percentuale per iniziative sociali',
+            'legal_fund_share': 'Percentuale per assistenza legale',
+            'accountant_fund_share': 'Percentuale per assistenza fiscale e contabile',
+            'incentive_rate': 'Tariffa incentivo GSE per energia condivisa',
+            'grid_savings_rate': 'Risparmio sugli oneri di rete per energia condivisa'
         }
+        
+    def clean(self):
+        """Validazione delle percentuali di ripartizione"""
+        cleaned_data = super().clean()
+        
+        # Verifica che la somma delle percentuali sia 100%
+        percentages = [
+            cleaned_data.get('producer_share', 0),
+            cleaned_data.get('consumer_share', 0),
+            cleaned_data.get('admin_share', 0),
+            cleaned_data.get('investment_fund_share', 0),
+            cleaned_data.get('solidarity_fund_share', 0),
+            cleaned_data.get('legal_fund_share', 0),
+            cleaned_data.get('accountant_fund_share', 0)
+        ]
+        
+        from decimal import Decimal
+        total = sum([Decimal(str(p)) for p in percentages if p is not None])
+        
+        if total != Decimal('100.00'):
+            raise forms.ValidationError(
+                f'La somma delle percentuali deve essere 100%. Attuale: {total}%'
+            )
+            
+        return cleaned_data
 
 class CERMembershipForm(forms.ModelForm):
     """Form per la gestione dell'adesione a una CER"""

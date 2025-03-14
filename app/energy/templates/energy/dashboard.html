@@ -6,9 +6,18 @@
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h2>Dashboard Energia</h2>
     <div class="btn-toolbar mb-2 mb-md-0">
-        <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" id="periodDropdown">
-            Periodo
-        </button>
+        <div class="dropdown mr-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" id="periodDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                Periodo
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="periodDropdown">
+                <li><a class="dropdown-item" href="#" data-range="5m">Ultimi 5 minuti</a></li>
+                <li><a class="dropdown-item" href="#" data-range="1h">Ultima ora</a></li>
+                <li><a class="dropdown-item" href="#" data-range="24h">Ultime 24 ore</a></li>
+                <li><a class="dropdown-item" href="#" data-range="48h">Ultimi 2 giorni</a></li>
+            </ul>
+        </div>
+        <span class="text-muted ml-2">Ultimo aggiornamento: <span id="lastUpdate">{{ now|time:"H:i:s" }}</span></span>
     </div>
 </div>
 
@@ -55,6 +64,72 @@
                 <span class="badge {% if mqtt_stats.errors > 0 %}bg-danger{% else %}bg-success{% endif %}">
                     {{ mqtt_stats.errors }} errori
                 </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sezione grafici potenza e consumo -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Potenza in Tempo Reale</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container" style="position: relative; height:300px;">
+                    <canvas id="energyChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Consumo Energetico</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container" style="position: relative; height:300px;">
+                    <canvas id="consumptionChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Nuova sezione per i benefici economici della CER -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Benefici Economici CER</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-5">
+                        <div class="chart-container" style="position: relative; height:300px;">
+                            <canvas id="settlementChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-md-7">
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="settlementTable">
+                                <thead>
+                                    <tr>
+                                        <th>Periodo</th>
+                                        <th>Energia Prodotta</th>
+                                        <th>Energia Consumata</th>
+                                        <th>Energia Condivisa</th>
+                                        <th>Beneficio (€)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- I dati verranno inseriti dal JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -117,6 +192,10 @@
                         Dispositivi Online
                         <span class="badge bg-primary">{{ online_percentage }}%</span>
                     </li>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        Potenza Totale
+                        <span class="badge bg-info">{{ total_power }} kW</span>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -128,10 +207,4 @@
 {{ block.super }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="{% static 'energy/js/dashboard.js' %}"></script>
-<script>
-    // Refresh automatico dei dati ogni 30 secondi
-    setInterval(function() {
-        location.reload();
-    }, 30000);
-</script>
 {% endblock %}

@@ -29,6 +29,73 @@ class CERConfiguration(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField("Attiva", default=True)
     
+    # Configurazione ripartizione incentivi (percentuali)
+    producer_share = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=40.00,
+        verbose_name="Quota Produttori (%)",
+        help_text="Percentuale dell'incentivo da assegnare ai produttori"
+    )
+    consumer_share = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=30.00,
+        verbose_name="Quota Consumatori (%)",
+        help_text="Percentuale dell'incentivo da assegnare ai consumatori"
+    )
+    admin_share = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=10.00,
+        verbose_name="Quota Amministrazione (%)",
+        help_text="Percentuale dell'incentivo per costi amministrativi"
+    )
+    investment_fund_share = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=10.00,
+        verbose_name="Fondo Investimenti (%)",
+        help_text="Percentuale per futuri investimenti della CER"
+    )
+    solidarity_fund_share = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=5.00,
+        verbose_name="Fondo Solidarietà (%)",
+        help_text="Percentuale per iniziative sociali"
+    )
+    legal_fund_share = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=5.00,
+        verbose_name="Fondo Avvocato (%)",
+        help_text="Percentuale per assistenza legale"
+    )
+    accountant_fund_share = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=0.00,
+        verbose_name="Fondo Commercialista (%)",
+        help_text="Percentuale per assistenza fiscale e contabile"
+    )
+    
+    # Tariffe incentivi (€/kWh)
+    incentive_rate = models.DecimalField(
+        max_digits=8, 
+        decimal_places=5, 
+        default=0.11800,
+        verbose_name="Tariffa Incentivo (€/kWh)",
+        help_text="Tariffa incentivo GSE per energia condivisa"
+    )
+    grid_savings_rate = models.DecimalField(
+        max_digits=8, 
+        decimal_places=5, 
+        default=0.00950,
+        verbose_name="Risparmio Oneri Rete (€/kWh)",
+        help_text="Risparmio sugli oneri di rete per energia condivisa"
+    )
+    
     members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         through='CERMembership',
@@ -36,6 +103,22 @@ class CERConfiguration(models.Model):
         related_name='cer_configurations'
     )
 
+    def clean(self):
+        """Validazione delle percentuali di ripartizione"""
+        from django.core.exceptions import ValidationError
+        from decimal import Decimal
+        
+        # Verifica che la somma delle percentuali sia 100%
+        total = (self.producer_share + self.consumer_share + 
+                 self.admin_share + self.investment_fund_share + 
+                 self.solidarity_fund_share + self.legal_fund_share + 
+                 self.accountant_fund_share)
+                 
+        if total != Decimal('100.00'):
+            raise ValidationError({
+                'producer_share': f'La somma delle percentuali deve essere 100%. Attuale: {total}%'
+            })
+    
     class Meta:
         verbose_name = "Configurazione CER"
         verbose_name_plural = "Configurazioni CER"

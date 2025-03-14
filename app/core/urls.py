@@ -12,6 +12,8 @@ from .views import (
     CERListView,
     CERDetailView,
     CERJoinView,
+    CERCreateView,
+    CERDistributionSettingsView,
     
     # Views Plant
     PlantListView,
@@ -45,8 +47,10 @@ urlpatterns = [
 
     # CER URLs
     path('cer/', CERListView.as_view(), name='cer_list'),
+    path('cer/create/', CERCreateView.as_view(), name='cer_create'),
     path('cer/<int:pk>/', CERDetailView.as_view(), name='cer_detail'),
     path('cer/<int:pk>/join/', CERJoinView.as_view(), name='cer_join'),
+    path('cer/<int:pk>/distribution/', CERDistributionSettingsView.as_view(), name='cer_distribution_settings'),
     
     # Plant URLs - Base Operations
     path('plants/', PlantListView.as_view(), name='plant_list'),

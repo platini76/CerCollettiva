@@ -19,6 +19,18 @@ from .views.device_views import (
     device_delete
 )
 from .views.mqtt_views import mqtt_settings, mqtt_control, save_mqtt_settings
+from .views.settlement_views import (
+    settlement_dashboard,
+    settlement_detail,
+    settlement_new,
+    settlement_create,
+    settlement_action,
+    settlement_member_view,
+    api_settlement_list,
+    api_settlement_detail,
+    api_member_settlements,
+    api_dashboard_summary
+)
 from .views.api import PlantViewSet, DeviceConfigurationViewSet, DeviceMeasurementViewSet
 
 app_name = 'energy'
@@ -49,6 +61,14 @@ urlpatterns = [
     path('measurements/', MeasurementListView.as_view(), name='measurement-list'),
     path('measurements/<int:pk>/', MeasurementDetailView.as_view(), name='measurement-detail'),
 
+    # Gestione Settlements CER
+    path('settlements/', settlement_dashboard, name='settlements'),
+    path('settlements/new/', settlement_new, name='settlement_new'),
+    path('settlements/create/', settlement_create, name='settlement_create'),
+    path('settlements/<int:settlement_id>/', settlement_detail, name='settlement_detail'),
+    path('settlements/<int:settlement_id>/action/', settlement_action, name='settlement_action'),
+    path('settlements/member/', settlement_member_view, name='settlement_member'),
+    
     # Configurazione MQTT
     path('settings/mqtt/', mqtt_settings, name='mqtt_settings'),
     path('settings/mqtt/save/', save_mqtt_settings, name='save_mqtt_settings'),
@@ -66,8 +86,16 @@ urlpatterns = [
          DeviceMeasurementViewSet.as_view({'get': 'latest'}),
          name='api-measurements-latest'),
          
-    # API Dati di Potenza
-    path('api/total-power/', total_power_data, name='total-power-data'),
+    # API Dati di Potenza e Dashboard
+    path('api/dashboard/data/', total_power_data, name='total-power-data'),
+    path('api/dashboard/summary/', api_dashboard_summary, name='dashboard-summary'),
+    
+    # API Settlement
+    path('api/settlements/', api_settlement_list, name='api-settlements'),
+    path('api/settlements/<int:settlement_id>/', api_settlement_detail, name='api-settlement-detail'),
+    path('api/member-settlements/', api_member_settlements, name='api-member-settlements'),
+    path('api/energy/settlement/', api_dashboard_summary, name='api-settlement'),
+    path('api/energy/consumption/', api_dashboard_summary, name='api-consumption'),
 
     # Inclusione delle API REST standard come ultimo pattern
     path('api/', include(router.urls)),

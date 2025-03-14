@@ -1,7 +1,7 @@
 # core/views/base.py
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.views.generic import TemplateView 
+from django.views.generic import TemplateView, FormView
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.contrib import messages
@@ -98,3 +98,7 @@ class BaseCERView(CerBaseView):
             memberships__user=self.request.user,
             memberships__is_active=True
         ).distinct()
+        
+    def dispatch(self, request, *args, **kwargs):
+        """Assicura che il dispatch funzioni correttamente per tutte le viste"""
+        return super().dispatch(request, *args, **kwargs)

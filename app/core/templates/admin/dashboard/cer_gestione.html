@@ -15,11 +15,16 @@
    <div class="card data-card mb-4">
        <div class="card-header d-flex justify-content-between align-items-center">
            <h5 class="mb-0">CER Configurate</h5>
-           {% if has_add_permission %}
-           <a href="{% url 'ceradmin:core_cerconfiguration_add' %}" class="btn btn-sm btn-primary">
-               <i class="fas fa-plus"></i> Nuova CER
-           </a>
-           {% endif %}
+           <div class="d-flex gap-2">
+               <a href="{% url 'core:cer_create' %}" class="btn btn-sm btn-success">
+                   <i class="fas fa-plus"></i> Nuova CER
+               </a>
+               {% if has_add_permission %}
+               <a href="{% url 'ceradmin:core_cerconfiguration_add' %}" class="btn btn-sm btn-primary">
+                   <i class="fas fa-plus"></i> Nuova CER (Admin)
+               </a>
+               {% endif %}
+           </div>
        </div>
        
        <div class="card-body">
@@ -57,11 +62,11 @@
                            </td>
                            <td>
                                <div class="btn-group">
-                                   <a href="{% url 'core:cer_detail' cer.id %}" class="btn btn-sm btn-info">
+                                   <a href="{% url 'core:cer_detail' pk=cer.id %}" class="btn btn-sm btn-info">
                                        <i class="fas fa-info-circle"></i>
                                    </a>
                                    {% if has_change_permission %}
-                                   <a href="{% url 'ceradmin:core_cerconfiguration_change' cer.id %}" 
+                                   <a href="{% url 'ceradmin:core_cerconfiguration_change' cer.pk %}" 
                                       class="btn btn-sm btn-warning">
                                        <i class="fas fa-edit"></i>
                                    </a>
