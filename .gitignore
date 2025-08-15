@@ -1,11 +1,22 @@
 # Django
 *.log
+*.log.*
 *.pot
 *.pyc
+*.py[cod]
+*$py.class
+*.so
+*.mo
 __pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*/*/*/__pycache__/
+*/*/*/*/__pycache__/
+*/*/*/*/*/__pycache__/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+*.db
 
 # Environment variables - CRITICAL: Never commit sensitive data
 .env
@@ -13,9 +24,31 @@ db.sqlite3-journal
 .env.production
 .env.staging
 
+# Logs
+app/access_logs.log
+app/logs/
+logs/
+
 # Media files
 media/
 staticfiles/
+app/media/*
+!app/media/.gitkeep
+app/staticfiles/*
+!app/staticfiles/.gitkeep
+
+# Keys and security
+app/keydir/*
+!app/keydir/.gitkeep
+secrets/
+*.key
+*.pem
+*.crt
+
+# Cache e settings locali
+app/cercollettiva/settings/local.py
+app/cercollettiva/settings/dev.py
+app/cercollettiva/settings/mqtt.py
 
 # IDE
 .vscode/
@@ -23,6 +56,9 @@ staticfiles/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
 
 # OS
 .DS_Store
@@ -32,12 +68,16 @@ staticfiles/
 .Trashes
 ehthumbs.db
 Thumbs.db
+.directory
 
 # Python
-*.py[cod]
-*$py.class
-*.so
 .Python
+app/venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
 build/
 develop-eggs/
 dist/
@@ -58,11 +98,8 @@ MANIFEST
 # Django specific
 migrations/
 !migrations/__init__.py
-*.sqlite3
-
-# Logs
-logs/
-*.log
+app/*/migrations/
+!app/*/migrations/__init__.py
 
 # Temporary files
 *.tmp
@@ -72,19 +109,10 @@ logs/
 # Documentation
 docs/_build/
 
-# Virtual environments
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-
-# PyCharm
-.idea/
-
 # Coverage reports
 htmlcov/
 .tox/
+.nox/
 .coverage
 .coverage.*
 .cache
@@ -120,12 +148,6 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Secret management
-secrets/
-*.key
-*.pem
-*.crt
 
 # Backup files
 *.bak
