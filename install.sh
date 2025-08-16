@@ -28,7 +28,7 @@ PROJECT_PATH="" # Sarà impostato in setup_user
 # Variabili aggiuntive per la configurazione di rete e sicurezza
 PUBLIC_DOMAIN=""
 PUBLIC_IP=""
-USE_SSL=false
+USE_SSL=False
 
 # Funzione di logging
 log() {
