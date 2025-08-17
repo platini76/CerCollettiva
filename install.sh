@@ -248,13 +248,13 @@ ALLOWED_HOSTS = $allowed_hosts
 $csrf_trusted_origins
 
 # Impostazioni di sicurezza dei cookie
-SESSION_COOKIE_SECURE = ${USE_SSL}
-CSRF_COOKIE_SECURE = ${USE_SSL}
-SECURE_SSL_REDIRECT = ${USE_SSL}
-SECURE_HSTS_SECONDS = 31536000 if ${USE_SSL} else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = ${USE_SSL}
-SECURE_HSTS_PRELOAD = ${USE_SSL}
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if ${USE_SSL} else None
+SESSION_COOKIE_SECURE = True if ${USE_SSL} else False
+CSRF_COOKIE_SECURE = True if ${USE_SSL} else False
+SECURE_SSL_REDIRECT = True if ${USE_SSL} else False
+SECURE_HSTS_SECONDS = 31536000 if ${USE_SSL} == true else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True if ${USE_SSL} else False
+SECURE_HSTS_PRELOAD = True if ${USE_SSL} else False
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if ${USE_SSL} == true else None
 
 # Sicurezza aggiuntiva
 X_FRAME_OPTIONS = 'DENY'
